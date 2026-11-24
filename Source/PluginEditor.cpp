@@ -6,6 +6,9 @@ constexpr float degrees = juce::MathConstants<float>::pi / 180.0f;
 
 juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 
+constexpr double minScale = 0.6, maxScale = 2.0;
+const juce::Identifier uiScaleId { "uiScale" };
+
 // Доп. параметры машины во всплывающей коробке (главная ручка и Mix — на колёсах).
 struct Extra
 {
@@ -76,7 +79,8 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); })
 {
     setLookAndFeel (&look);
-    addAndMakeVisible (road);
+    addAndMakeVisible (content);
+    content.addAndMakeVisible (road);
     road.onSelectionChanged = [this] (int car) { showPopup (car); };
 
     // Всплывающая коробка открытой машины.
@@ -103,9 +107,18 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
         popup.addAndMakeVisible (row.label);
         popup.addAndMakeVisible (row.slider);
     }
-    addChildComponent (popup);
+    content.addChildComponent (popup);
+    layoutContent();
 
-    setSize (RoadView::width, RoadView::height);
+    // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер хранится в состоянии.
+    // Сохранённый масштаб читаем до setResizable: тот уже зовёт resized() и перезаписал бы его.
+    const double scale = juce::jlimit (minScale, maxScale, static_cast<double> (p.apvts.state.getProperty (uiScaleId, 1.0)));
+    const double w = RoadView::width, h = RoadView::height;
+    setResizable (true, true);
+    setResizeLimits (juce::roundToInt (w * minScale), juce::roundToInt (h * minScale),
+                     juce::roundToInt (w * maxScale), juce::roundToInt (h * maxScale));
+    getConstrainer()->setFixedAspectRatio (w / h);
+    setSize (juce::roundToInt (w * scale), juce::roundToInt (h * scale));
 }
 
 GentraAudioProcessorEditor::~GentraAudioProcessorEditor()
@@ -115,11 +128,19 @@ GentraAudioProcessorEditor::~GentraAudioProcessorEditor()
 
 void GentraAudioProcessorEditor::resized()
 {
-    road.setBounds (getLocalBounds());
+    const float scale = static_cast<float> (getWidth()) / static_cast<float> (RoadView::width);
+    content.setTransform (juce::AffineTransform::scale (scale));
+    gentraProcessor.apvts.state.setProperty (uiScaleId, scale, nullptr);
+}
+
+void GentraAudioProcessorEditor::layoutContent()
+{
+    content.setBounds (0, 0, RoadView::width, RoadView::height);
+    road.setBounds (content.getLocalBounds());
 
     popup.setTransform ({});
     // Пропорции — как у panel.png (760×213); винты в углах, поэтому поля по 34.
-    popup.setBounds ((getWidth() - 380) / 2, getHeight() - 8 - 106, 380, 106);
+    popup.setBounds ((RoadView::width - 380) / 2, RoadView::height - 8 - 106, 380, 106);
     onButton.setBounds (34, 12, 151, 30);
     closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
     for (int i = 0; i < 2; ++i)

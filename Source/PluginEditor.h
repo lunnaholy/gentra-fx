@@ -45,10 +45,13 @@ private:
     };
 
     void showPopup (int car);
+    void layoutContent();
 
     GentraAudioProcessor& gentraProcessor;
     BoxLook look;
 
+    // Весь интерфейс в базовом размере RoadView::width × height; окно масштабирует его целиком.
+    juce::Component content;
     RoadView road;
 
     Box popup;

@@ -22,8 +22,6 @@ namespace
 constexpr float rearWheelX = 0.222f, frontWheelX = 0.81f;
 constexpr float wheelY = 0.083f; // центр колеса над асфальтом
 constexpr float wheelR = 0.083f; // радиус колеса
-// 2 — крупный пиксель, как в прототипе. Для реалистичных фото поставьте 1.
-constexpr int pixelScale = 1;
 // Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
 constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 // =======================================================================
@@ -541,19 +539,11 @@ void RoadView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 
 void RoadView::paint (juce::Graphics& g)
 {
-    const int fw = width / pixelScale, fh = height / pixelScale;
-    if (frame.getWidth() != fw || frame.getHeight() != fh)
-        frame = juce::Image (juce::Image::RGB, fw, fh, false);
-
+    // Сразу в окно, без промежуточного буфера: при любом масштабе окна сцена остаётся чёткой.
     {
-        juce::Graphics fg (frame);
-        fg.addTransform (juce::AffineTransform::scale (1.0f / static_cast<float> (pixelScale)));
-        drawScene (fg);
+        juce::Graphics::ScopedSaveState s (g);
+        drawScene (g);
     }
-
-    g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
-    g.drawImage (frame, getLocalBounds().toFloat());
-    g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
     drawOverlays (g);
 }
 

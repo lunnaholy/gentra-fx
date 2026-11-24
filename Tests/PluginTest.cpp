@@ -241,10 +241,25 @@ void traffic()
     }
 }
 
-// --snapshot out.png [percent] [frames] [car]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
-int snapshot (const char* path, float percent, int frames, int car)
+// Масштаб окна: сохраняется в состоянии, новое окно открывается в том же размере, пропорции держатся.
+void uiScale()
 {
     GentraAudioProcessor p;
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+        CHECK (editor->getWidth() == RoadView::width && editor->isResizable());
+        editor->setSize (RoadView::width * 3 / 2, RoadView::height * 3 / 2);
+    }
+    CHECK (std::abs (static_cast<double> (p.apvts.state.getProperty ("uiScale")) - 1.5) < 0.01);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    CHECK (editor->getWidth() == RoadView::width * 3 / 2 && editor->getHeight() == RoadView::height * 3 / 2);
+}
+
+// --snapshot out.png [percent] [frames] [car] [scale]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
+int snapshot (const char* path, float percent, int frames, int car, double scale)
+{
+    GentraAudioProcessor p;
+    p.apvts.state.setProperty ("uiScale", scale, nullptr);
     setParam (p, "bass", percent);
     setParam (p, "lores", percent);
 
@@ -255,7 +270,7 @@ int snapshot (const char* path, float percent, int frames, int car)
     for (int i = 0; i < frames; ++i)
         gentra->advance (1.0f / 60.0f);
 
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f / static_cast<float> (scale));
     const juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (path));
     file.deleteFile();
     juce::FileOutputStream out (file);
@@ -270,11 +285,12 @@ int main (int argc, char** argv)
 
     if (argc >= 3 && std::strcmp (argv[1], "--snapshot") == 0)
         return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0,
-                         argc > 5 ? std::atoi (argv[5]) : -1);
+                         argc > 5 ? std::atoi (argv[5]) : -1, argc > 6 ? std::atof (argv[6]) : 1.0);
 
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
     traffic();
+    uiScale();
 
     std::printf ("OK\n");
     return 0;

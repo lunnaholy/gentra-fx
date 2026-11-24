@@ -86,7 +86,6 @@ private:
 
     std::array<juce::Image, numCars> bodies;
     juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate, tag;
-    juce::Image frame; // сцена в пониженном разрешении («крупный пиксель»)
 
     std::array<Car, numCars> cars;
     juce::Random rng;
