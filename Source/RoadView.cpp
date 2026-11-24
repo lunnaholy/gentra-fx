@@ -24,6 +24,8 @@ constexpr float wheelY = 0.083f; // центр колеса над асфаль�
 constexpr float wheelR = 0.083f; // радиус колеса
 // Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
 constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
+// Под бит DAW: сколько держится уровень низа между долями, с; во сколько слабее несильные доли.
+constexpr float beatHold = 0.6f, weakBeat = 0.6f;
 // =======================================================================
 
 constexpr float W = static_cast<float> (RoadView::width);
@@ -140,8 +142,8 @@ juce::Font RoadView::font (float size)
 juce::String RoadView::effectName (int car) { return ru (carInfo[static_cast<size_t> (car)].name); }
 juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[static_cast<size_t> (car)].colour); }
 
-RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level)
-    : apvts (state), bassLevel (std::move (level)),
+RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level, BeatClock clock)
+    : apvts (state), bassLevel (std::move (level)), beatClock (std::move (clock)),
       sky (asset ("sky_jpg")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
       road (asset ("road_jpg")), lamp (asset ("lamp_png")), props (asset ("props_png")),
       wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
@@ -434,7 +436,23 @@ void RoadView::advance (float dt)
 
     // Тряска: мгновенная атака, экспоненциальный спад. Земля прыгает сильнее, чем ездит вбок.
     const float level = bassLevel != nullptr ? juce::jlimit (0.0f, 1.0f, bassLevel()) : 0.0f;
-    rumble = juce::jmax (level, rumble * std::exp (-dt / shakeRelease));
+    double beat = 0.0, bpm = 120.0;
+    if (beatClock != nullptr && beatClock (beat, bpm))
+    {
+        // Транспорт играет: удар ровно на каждой доле (сильная — сильнее), сила — от низа за последние доли.
+        bassHold = juce::jmax (level, bassHold * std::exp (-dt / beatHold));
+        const double frac = beat - std::floor (beat);
+        const auto sinceBeat = static_cast<float> (frac * 60.0 / bpm);
+        rumble = bassHold * (beat < 1.0 ? 1.0f : weakBeat) * std::exp (-sinceBeat / shakeRelease);
+        pulse = static_cast<float> (frac);
+    }
+    else
+    {
+        // Стоит: тряска прямо от пиков низа.
+        bassHold = level;
+        rumble = juce::jmax (level, rumble * std::exp (-dt / shakeRelease));
+        pulse = std::fmod (time * 2.0f, 1.0f);
+    }
     shake = { rumble * shakePx * 0.4f * (rng.nextFloat() * 2.0f - 1.0f), rumble * shakePx * (rng.nextFloat() * 2.0f - 1.0f) };
 
     place();
@@ -649,7 +667,7 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     const auto& c = cars[static_cast<size_t> (i)];
     const auto& body = bodies[static_cast<size_t> (i)];
     const bool on = isOn (i);
-    const float phase = std::fmod (time * 2.0f, 1.0f);
+    const float phase = pulse;
 
     juce::Graphics::ScopedSaveState save (g);
     // Дальше всё в единицах машины: x 0..1 от зада к носу, y вверх от асфальта.

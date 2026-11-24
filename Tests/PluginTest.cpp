@@ -272,6 +272,52 @@ void garage()
     CHECK (q.apvts.getRawParameterValue ("bassOn")->load() < 0.5f);
 }
 
+// Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
+struct FakeHead final : juce::AudioPlayHead
+{
+    juce::Optional<PositionInfo> getPosition() const override { return info; }
+    PositionInfo info;
+};
+
+void beatSync()
+{
+    GentraAudioProcessor p;
+    p.prepareToPlay (48000.0, 512);
+    FakeHead head;
+    p.setPlayHead (&head);
+    juce::AudioBuffer<float> buf (2, 512);
+    juce::MidiBuffer midi;
+    double beat = 0.0, bpm = 0.0;
+
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    head.info.setPpqPosition (9.5); // 4/4, такт с 8 — вторая доля, середина
+    head.info.setPpqPositionOfLastBarStart (8.0);
+    head.info.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+    buf.clear();
+    p.processBlock (buf, midi);
+    CHECK (p.beatNow (beat, bpm) && std::abs (beat - 1.5) < 0.02 && std::abs (bpm - 120.0) < 1.0e-6);
+
+    head.info.setPpqPosition (7.5); // 6/8, такт с 6 — доля восьмая: четвёртая доля, темп в восьмых вдвое выше
+    head.info.setPpqPositionOfLastBarStart (6.0);
+    head.info.setTimeSignature (juce::AudioPlayHead::TimeSignature { 6, 8 });
+    p.processBlock (buf, midi);
+    CHECK (p.beatNow (beat, bpm) && std::abs (beat - 3.0) < 0.05 && std::abs (bpm - 240.0) < 1.0e-6);
+
+    head.info.setIsPlaying (false);
+    p.processBlock (buf, midi);
+    CHECK (! p.beatNow (beat, bpm));
+    p.setPlayHead (nullptr);
+
+    // Интерфейс: низ на максимуме, доля задаётся вручную.
+    double at = 0.0;
+    RoadView road (p.apvts, [] { return 1.0f; }, [&at] (double& b, double& t) { b = at; t = 120.0; return true; });
+    const auto shakeAt = [&] (double position) { at = position; road.advance (1.0f / 60.0f); return road.getRumble(); };
+    const float downbeat = shakeAt (0.02), weak = shakeAt (1.02), between = shakeAt (1.5);
+    std::printf ("beat shake: downbeat %.2f, weak %.2f, between %.2f\n", downbeat, weak, between);
+    CHECK (downbeat > 0.8f && weak > 0.4f && weak < downbeat && between < 0.2f);
+}
+
 // Масштаб окна: сохраняется в состоянии, новое окно открывается в том же размере, пропорции держатся.
 void uiScale()
 {
@@ -329,6 +375,7 @@ int main (int argc, char** argv)
     traffic();
     uiScale();
     garage();
+    beatSync();
 
     std::printf ("OK\n");
     return 0;

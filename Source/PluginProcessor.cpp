@@ -141,6 +141,7 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
+    readTransport();
     black.updateTargets();
     rust.updateTargets();
 
@@ -207,6 +208,41 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         if (peak > bassLevel.load (std::memory_order_relaxed))
             bassLevel.store (peak, std::memory_order_relaxed);
     }
+}
+
+void GentraAudioProcessor::readTransport() noexcept
+{
+    const auto* playHead = getPlayHead();
+    const auto pos = playHead != nullptr ? playHead->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
+    const auto ppq = pos ? pos->getPpqPosition() : juce::Optional<double>();
+    const auto bpm = pos ? pos->getBpm() : juce::Optional<double>();
+    if (! pos || ! pos->getIsPlaying() || ! ppq || ! bpm || *bpm <= 0.0)
+    {
+        clockPlaying.store (false, std::memory_order_relaxed);
+        return;
+    }
+
+    // Доля — по знаменателю размера (в 6/8 доля — восьмая), такт — от начала последнего такта.
+    const auto sig = pos->getTimeSignature().orFallback (juce::AudioPlayHead::TimeSignature {});
+    const double beatLen = 4.0 / juce::jmax (1, sig.denominator);
+    const double barStart = pos->getPpqPositionOfLastBarStart().orFallback (0.0);
+    clockBeat.store ((*ppq - barStart) / beatLen, std::memory_order_relaxed);
+    clockBpm.store (*bpm / beatLen, std::memory_order_relaxed); // хост даёт четверти в минуту, нам — доли в минуту
+    clockBeatsPerBar.store (juce::jmax (1, sig.numerator), std::memory_order_relaxed);
+    clockStampMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
+    clockPlaying.store (true, std::memory_order_relaxed);
+}
+
+bool GentraAudioProcessor::beatNow (double& beatInBar, double& bpm) const noexcept
+{
+    const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - clockStampMs.load (std::memory_order_relaxed);
+    if (! clockPlaying.load (std::memory_order_relaxed) || elapsedMs > 500.0) // хост перестал звать processBlock
+        return false;
+
+    bpm = clockBpm.load (std::memory_order_relaxed);
+    const double beat = clockBeat.load (std::memory_order_relaxed) + elapsedMs / 60000.0 * bpm;
+    beatInBar = std::fmod (juce::jmax (0.0, beat), static_cast<double> (clockBeatsPerBar.load (std::memory_order_relaxed)));
+    return true;
 }
 
 juce::AudioProcessorEditor* GentraAudioProcessor::createEditor()

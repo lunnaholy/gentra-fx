@@ -38,6 +38,10 @@ public:
     // Пик низа (< ~150 Гц) на выходе с прошлого вызова — для тряски дороги в интерфейсе.
     float takeBassLevel() noexcept { return bassLevel.exchange (0.0f); }
 
+    // Где сейчас транспорт DAW: доля внутри такта (0 — сильная доля, дробная часть — фаза доли) и темп в долях в минуту.
+    // Между блоками досчитывается по темпу. false — транспорт стоит или хост не сообщает позицию.
+    bool beatNow (double& beatInBar, double& bpm) const noexcept;
+
 private:
     // Сглаженные параметры одной машины: главная ручка, два доп. параметра, итоговый wet (Mix с учётом вкл/выкл).
     struct Stage
@@ -68,6 +72,12 @@ private:
     gentra::LoRes lores;
 
     std::atomic<float> bassLevel { 0.0f };
+
+    // Снимок транспорта на начало последнего блока (пишет аудиопоток, читает интерфейс).
+    std::atomic<bool> clockPlaying { false };
+    std::atomic<double> clockBeat { 0.0 }, clockBpm { 120.0 }, clockStampMs { 0.0 };
+    std::atomic<int> clockBeatsPerBar { 4 };
+    void readTransport() noexcept;
     float meterLp = 0.0f, meterCoeff = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GentraAudioProcessor)

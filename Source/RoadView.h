@@ -29,8 +29,10 @@ public:
     static juce::Image image (const char* binaryDataName); // PNG из Assets/
     static juce::Font font (float size);                   // шрифт интерфейса
 
-    // bassLevel — откуда брать уровень низа для тряски (вызывается раз в кадр на message thread).
-    RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel);
+    // bassLevel — откуда брать уровень низа для тряски; beatClock — где сейчас транспорт DAW
+    // (доля в такте и темп в долях в минуту, false — стоит). Оба зовутся раз в кадр на message thread.
+    using BeatClock = std::function<bool (double& beatInBar, double& bpm)>;
+    RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel, BeatClock beatClock = {});
 
     // Скрытые машины не рисуются и не мешают потоку; скрытый рабочий эффект выключается.
     // Маска хранится в состоянии плагина (пресеты).
@@ -47,6 +49,7 @@ public:
     // Для теста шашек.
     int getLaneChanges() const noexcept { return laneChanges; }
     float closestGap() const; // минимальная дистанция между машинами в одной полосе
+    float getRumble() const noexcept { return rumble; } // сила тряски в этом кадре, 0..1
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -89,6 +92,7 @@ private:
 
     juce::AudioProcessorValueTreeState& apvts;
     std::function<float()> bassLevel;
+    BeatClock beatClock;
 
     std::array<juce::Image, numCars> bodies;
     juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate, tag;
@@ -102,7 +106,9 @@ private:
     int laneChanges = 0;
     int hiddenMask = 0; // копия маски из состояния на этот кадр
     bool hidden (int car) const noexcept { return (hiddenMask >> car) & 1; }
-    float rumble = 0.0f;            // огибающая низа
+    float rumble = 0.0f;            // сила тряски в этом кадре
+    float bassHold = 0.0f;          // уровень низа, удерживаемый между долями
+    float pulse = 0.0f;             // фаза доли 0..1 (на стопе — свои 2 Гц): саб, аварийка
     juce::Point<float> shake;       // смещение земли и машин в этом кадре
 
     struct Drag
