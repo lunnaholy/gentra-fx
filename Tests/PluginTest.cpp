@@ -244,6 +244,22 @@ void traffic()
         CHECK (flashFrames > 0 && flashFrames < 3600 / 2); // моргают иногда — только быстрые
         CHECK (road.getYields() > 0);                     // и им уступают
     }
+
+    // Выключенные уходят на обочину по одной полосе, а не сквозь соседние (с этой маской раньше въезжали).
+    p.apvts.state.setProperty ("hiddenCars", (1 << 7) | (1 << 10), nullptr);
+    for (int car : { -1, 0 })
+    {
+        RoadView road (p.apvts, nullptr);
+        road.select (car);
+        float gap = 1.0e9f;
+        for (int i = 0; i < 60 * 60; ++i)
+        {
+            road.advance (1.0f / 60.0f);
+            if (i > 60)
+                gap = juce::jmin (gap, road.closestGap());
+        }
+        CHECK (gap > 100.0f);
+    }
 }
 
 // Гараж: скрытая машина закрывается, если была открыта, выключает свой эффект, не мешает потоку,

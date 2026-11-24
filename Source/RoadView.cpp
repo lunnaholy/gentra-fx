@@ -431,15 +431,19 @@ void RoadView::advance (float dt)
         }
         else if (! on)
         {
-            if (c.lane != shoulder && laneFree (i, shoulder))
-                c.lane = shoulder; // выключенная — на обочину
+            // Выключенная — на обочину, по одной полосе, иначе проехала бы сквозь машины в соседних.
+            if (c.lane != shoulder && c.cool <= 0.0f && laneFree (i, c.lane + 1))
+            {
+                ++c.lane;
+                c.cool = laneChangeTime;
+            }
             else if (pushed && (c.cool > 0.0f || ! yieldLane (i)))
                 target = juce::jmax (target, pushSpeed + yieldBoost); // не пускают на обочину, а сзади моргают — уступает как все
         }
         else if (c.lane == shoulder)
         {
             const int back = selected >= 0 ? lanes - 2 : lanes - 1;
-            if (laneFree (i, back))
+            if (laneFree (i, back) && laneFree (i, lanes - 1)) // через ближнюю полосу — она тоже должна быть свободна
             {
                 c.lane = back;
                 c.cool = 1.0f;
