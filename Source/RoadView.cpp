@@ -134,6 +134,7 @@ juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 const std::array<RoadView::Working, RoadView::numWorking> RoadView::working { {
     { "bass", "САБ", "bassMix", "bassOn" },
     { "lores", "LO-RES", "loresMix", "loresOn" },
+    { "drive", "ДРАЙВ", "distMix", "distOn" },
 } };
 
 juce::Image RoadView::image (const char* name)
@@ -201,6 +202,8 @@ float RoadView::strength (int car) const
         return juce::jlimit (0.0f, 1.0f, juce::jmax (param ("bass"), param ("tint")) * 0.01f * param ("bassMix") * 0.01f);
     if (car == rustCar)
         return param ("lores") * 0.01f * param ("loresMix") * 0.01f;
+    if (car == red)
+        return param ("drive") * 0.01f * param ("distMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -766,9 +769,10 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     const float sub = param ("bass") * 0.01f;
     const float blackMix = isOn (black) ? param ("bassMix") * 0.01f : 0.0f;
 
-    if (i == red)
+    if (i == red && on && param ("drive") > 0.0f)
     {
-        const float len = (0.1f + 0.45f * 0.55f * 0.45f) * (0.8f + 0.2f * std::sin (time * 40.0f));
+        // Пламя из выхлопа: длина от драйва, яркость пламени не зависит от Mix.
+        const float len = (0.05f + 0.4f * param ("drive") * 0.01f) * (0.8f + 0.2f * std::sin (time * 40.0f));
         juce::ColourGradient flame (juce::Colour (0xfffff2a8), 0.03f, 0.0f, rgba (255, 60, 0, 0.0f), 0.03f - len, 0.0f, false);
         flame.addColour (0.4, juce::Colour (0xffff8a1f));
         g.setGradientFill (flame);

@@ -20,6 +20,7 @@ struct Extra
 const std::array<std::array<Extra, 2>, RoadView::numWorking> extras { {
     { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 } } },
     { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 } } },
+    { { { "distTone", "Тон", "%", 0 }, { nullptr, "", "", 0 } } }, // id nullptr — строки нет
 } };
 
 // Картинка с неизменными углами: srcCorner пикселей картинки ложатся в dstCorner пикселей окна.
@@ -278,6 +279,10 @@ void GentraAudioProcessorEditor::showPopup (int car)
     {
         const auto& extra = extras[static_cast<size_t> (car)][i];
         auto& row = rows[i];
+        row.label.setVisible (extra.id != nullptr);
+        row.slider.setVisible (extra.id != nullptr);
+        if (extra.id == nullptr)
+            continue;
         row.label.setText (ru (extra.label), juce::dontSendNotification);
         row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, extra.id, row.slider);
         // Attachment ставит свой форматтер — подменяем на русские единицы.

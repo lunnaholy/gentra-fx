@@ -5,14 +5,14 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-// Дорога с машинами — порт HTML-прототипа. Машины 0 (чёрная) и 1 (ржавая) — рабочие эффекты:
+// Дорога с машинами — порт HTML-прототипа. Машины 0 (чёрная), 1 (ржавая) и 2 (красная) — рабочие эффекты:
 // клик по машине приближает камеру, и её колёса становятся ручками. Остальные едут декоративным потоком.
 class RoadView final : public juce::Component,
                        private juce::Timer
 {
 public:
     static constexpr int numCars = 12;
-    static constexpr int numWorking = 2;
+    static constexpr int numWorking = 3;
     static constexpr int width = 900, height = 560;
 
     struct Working
