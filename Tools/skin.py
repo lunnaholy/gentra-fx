@@ -11,9 +11,13 @@ im = Image.open(src).convert('RGBA')
 a = np.array(im)[..., 3]
 
 # Кузов — самый большой непрозрачный кусок, заливкой от середины самой плотной строки.
-mask = Image.fromarray(((a > 48) * 255).astype('uint8')).copy()
-ImageDraw.floodfill(mask, (a.shape[1] // 2, int(np.argmax((a > 48).sum(1)))), 128)
+mask = Image.fromarray(((a > 128) * 255).astype('uint8')).copy()
+ImageDraw.floodfill(mask, (a.shape[1] // 2, int(np.argmax((a > 128).sum(1)))), 128)
 keep = np.array(mask) == 128
+# Дырки внутри силуэта (стёкла пожиже) — тоже кузов: снаружи только то, что достаёт до угла картинки.
+outside = Image.fromarray(np.where(keep, 0, 255).astype('uint8')).copy()
+ImageDraw.floodfill(outside, (0, 0), 64)
+keep = np.array(outside) != 64
 near = np.array(Image.fromarray((keep * 255).astype('uint8')).filter(ImageFilter.MaxFilter(5))) > 0
 arr = np.array(im)
 arr[..., 3] = np.where(near, a, 0) # полупрозрачные края и стёкла у кузова остаются
@@ -34,12 +38,14 @@ while x < W:
             l, r = s, x - 1
             while l > 0 and open_[l - 1]: l -= 1
             while r < W - 1 and open_[r + 1]: r += 1
-            arches.append((l, r, bottom[s:x].min()))
+            # центр — по глубокой части (пологий бампер не тянет арку вбок), радиус — до ближнего края
+            c = (s + x - 1) / 2
+            arches.append((c, min(c - l, r - c), bottom[s:x].min()))
     x += 1
 assert len(arches) == 2, f'нашлось арок: {len(arches)}'
 
-# Колесо: диаметр = ширина арки, зазор сверху как у старого кузова; низ колеса = низ картинки.
-R = sum(r - l for l, r, _ in arches) / 4
+# Колесо: вписано в арку, зазор сверху как у старого кузова; низ колеса = низ картинки.
+R = sum(h for _, h, _ in arches) / 2
 cy = max(t for *_, t in arches) + 0.0095 * W + R
 outH = int(round(max(H, cy + R)))
 canvas = Image.new('RGBA', (W, outH))
@@ -47,5 +53,4 @@ canvas.paste(body, (0, 0))
 canvas.resize((1024, round(outH * 1024 / W)), Image.LANCZOS).save(dst)
 
 u = lambda v: f'{v / W:.4f}f'
-(l0, r0, _), (l1, r1, _) = arches
-print(f'{{ {u((l0 + r0) / 2)}, {u((l1 + r1) / 2)}, {u(outH - cy)}, {u(R)}, <head>, <tail>, <side>, <exhaust> }}')
+print(f'{{ {u(arches[0][0])}, {u(arches[1][0])}, {u(outH - cy)}, {u(R)}, <head>, <tail>, <side>, <exhaust> }}')
