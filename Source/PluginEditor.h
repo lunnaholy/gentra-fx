@@ -50,7 +50,11 @@ public:
     void select (int car) { road.select (car); }
     void openGarage() { showGarage (true); }
 
+    // Общие настройки пользователя (масштаб окна); тест подменяет файл, чтобы не трогать настоящий.
+    static juce::File settingsFile;
+
 private:
+    static juce::PropertiesFile::Options settingsOptions();
     struct Row
     {
         juce::Label label;
@@ -63,6 +67,7 @@ private:
     void layoutContent();
 
     GentraAudioProcessor& gentraProcessor;
+    juce::PropertiesFile settings { settingsFile, settingsOptions() };
     BoxLook look;
 
     // Весь интерфейс в базовом размере RoadView::width × height; окно масштабирует его целиком.

@@ -323,25 +323,34 @@ void beatSync()
     CHECK (downbeat > 0.8f && weak > 0.4f && weak < downbeat && between < 0.2f);
 }
 
-// Масштаб окна: сохраняется в состоянии, новое окно открывается в том же размере, пропорции держатся.
+// Масштаб окна: общий для всех экземпляров (настройки пользователя, не пресет), пропорции держатся.
 void uiScale()
 {
-    GentraAudioProcessor p;
+    GentraAudioProcessor p, other;
     {
         std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
         CHECK (editor->getWidth() == RoadView::width && editor->isResizable());
         editor->setSize (RoadView::width * 3 / 2, RoadView::height * 3 / 2);
     }
-    CHECK (std::abs (static_cast<double> (p.apvts.state.getProperty ("uiScale")) - 1.5) < 0.01);
-    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    CHECK (! p.apvts.state.hasProperty ("uiScale"));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (other.createEditor()); // другой экземпляр — тот же размер
     CHECK (editor->getWidth() == RoadView::width * 3 / 2 && editor->getHeight() == RoadView::height * 3 / 2);
+}
+
+// Тест пишет настройки во временный файл, а не в настоящие настройки пользователя.
+void useTempSettings (double scale)
+{
+    auto& f = GentraAudioProcessorEditor::settingsFile;
+    f = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("GentraTest.settings");
+    f.deleteFile();
+    juce::PropertiesFile (f, {}).setValue ("uiScale", scale);
 }
 
 // --snapshot out.png [percent] [frames] [car] [scale]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
 int snapshot (const char* path, float percent, int frames, int car, double scale)
 {
+    useTempSettings (scale);
     GentraAudioProcessor p;
-    p.apvts.state.setProperty ("uiScale", scale, nullptr);
     setParam (p, "bass", percent);
     setParam (p, "lores", percent);
 
@@ -375,6 +384,7 @@ int main (int argc, char** argv)
         return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0,
                          argc > 5 ? std::atoi (argv[5]) : -1, argc > 6 ? std::atof (argv[6]) : 1.0);
 
+    useTempSettings (1.0);
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
     traffic();

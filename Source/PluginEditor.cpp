@@ -7,7 +7,7 @@ constexpr float degrees = juce::MathConstants<float>::pi / 180.0f;
 juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 
 constexpr double minScale = 0.6, maxScale = 2.0;
-const juce::Identifier uiScaleId { "uiScale" };
+const juce::String uiScaleKey { "uiScale" };
 
 // Доп. параметры машины во всплывающей коробке (главная ручка и Mix — на колёсах).
 struct Extra
@@ -182,9 +182,9 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     content.addChildComponent (garage);
     layoutContent();
 
-    // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер хранится в состоянии.
-    // Сохранённый масштаб читаем до setResizable: тот уже зовёт resized() и перезаписал бы его.
-    const double scale = juce::jlimit (minScale, maxScale, static_cast<double> (p.apvts.state.getProperty (uiScaleId, 1.0)));
+    // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер один на все проекты —
+    // в настройках пользователя, не в пресете. Читаем до setResizable: тот уже зовёт resized() и перезаписал бы его.
+    const double scale = juce::jlimit (minScale, maxScale, settings.getDoubleValue (uiScaleKey, 1.0));
     const double w = RoadView::width, h = RoadView::height;
     setResizable (true, true);
     setResizeLimits (juce::roundToInt (w * minScale), juce::roundToInt (h * minScale),
@@ -202,7 +202,23 @@ void GentraAudioProcessorEditor::resized()
 {
     const float scale = static_cast<float> (getWidth()) / static_cast<float> (RoadView::width);
     content.setTransform (juce::AffineTransform::scale (scale));
-    gentraProcessor.apvts.state.setProperty (uiScaleId, scale, nullptr);
+    settings.setValue (uiScaleKey, scale);
+}
+
+juce::File GentraAudioProcessorEditor::settingsFile = [] {
+    juce::PropertiesFile::Options o;
+    o.applicationName = JucePlugin_Name;
+    o.filenameSuffix = "settings";
+    o.osxLibrarySubFolder = "Application Support";
+    return o.getDefaultFile();
+}();
+
+juce::PropertiesFile::Options GentraAudioProcessorEditor::settingsOptions()
+{
+    settingsFile.getParentDirectory().createDirectory(); // PropertiesFile сам папку не создаёт
+    juce::PropertiesFile::Options o;
+    o.millisecondsBeforeSaving = 500; // тянут за угол — пишем на диск, когда отпустили
+    return o;
 }
 
 void GentraAudioProcessorEditor::layoutContent()
