@@ -264,6 +264,55 @@ void run (double sampleRate)
     CHECK (std::abs (q.apvts.getRawParameterValue ("tint")->load()) < 0.01f);
 }
 
+// Щелчки красной при включении и выключении. Синус 2 кГц, блоки по 64. Мерило — вторая разность выхода:
+// у гладкого синуса она ~0.04 (0.5·(2π·2000/fs)²), скачок даёт величину порядка самого скачка.
+void driveClicks (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 64);
+    p.prepareToPlay (sampleRate, 64);
+    setParam (p, "drive", 50.0f);
+    setParam (p, "distOn", 0.0f);
+
+    long long t = 0;
+    float y1 = 0.0f, y2 = 0.0f; // два прошлых сэмпла выхода — сквозь блоки и прогоны
+    // Прогоняет seconds секунд и возвращает наибольшую вторую разность выхода после from секунд.
+    const auto run = [&] (double seconds, double from)
+    {
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> buf (2, 64);
+        float jump = 0.0f;
+        const auto blocks = static_cast<int> (seconds * sampleRate / 64.0);
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int n = 0; n < 64; ++n)
+                for (int ch = 0; ch < 2; ++ch)
+                    buf.setSample (ch, n, 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 2000.0 * static_cast<double> (t + n) / sampleRate)));
+            t += 64;
+            p.processBlock (buf, midi);
+            for (int n = 0; n < 64; ++n)
+            {
+                const float y = buf.getSample (0, n);
+                if ((b * 64 + n) > from * sampleRate)
+                    jump = juce::jmax (jump, std::abs (y - 2.0f * y1 + y2));
+                y2 = y1;
+                y1 = y;
+            }
+        }
+        return jump;
+    };
+
+    run (0.1, 1.0e9);
+    setParam (p, "distOn", 1.0f);
+    const float on = run (0.002, -1.0); // первые 2 мс: Mix ещё почти 0, слышен бы только скачок фильтров
+    run (0.2, 1.0e9);
+    setParam (p, "distOn", 0.0f);
+    const float off = run (0.3, 0.049); // Mix доехал до ~0, дальше — переход в обход
+    std::printf ("drive clicks %.0f Hz: on %.3f, off %.3f\n", sampleRate, on, off);
+    CHECK (on < 0.06f && off < 0.06f);
+    CHECK (transparent (p, *std::make_unique<juce::Random> (1)));
+}
+
 // Шашки: за минуту поток перестраивается, машины в одной полосе не въезжают друг в друга
 // — и в свободном потоке, и когда открытая машина забрала ближнюю полосу.
 void traffic()
@@ -454,6 +503,8 @@ int main (int argc, char** argv)
     useTempSettings (1.0);
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
+    driveClicks (44100.0);
+    driveClicks (96000.0);
     traffic();
     uiScale();
     garage();

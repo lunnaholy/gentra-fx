@@ -75,8 +75,11 @@ private:
     gentra::LoRes lores;
     gentra::Drive drive;
     // ×2, IIR-полуполосные фильтры. Сухой сигнал смешивается внутри — проходит те же фильтры, фазы совпадают.
+    // Фильтры крутятся и в обходе (на копии, буфер не трогают): включение не стартует с нулевого состояния.
     static constexpr int driveChunk = 64;
     juce::dsp::Oversampling<float> oversampling { gentra::maxChannels, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
+    // Переход между обработкой и обходом — кроссфейд: у фильтров оверсэмплинга свой фазовый сдвиг, скачок щёлкал бы.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> driveEngaged;
 
     std::atomic<float> bassLevel { 0.0f };
 

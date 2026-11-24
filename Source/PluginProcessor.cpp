@@ -124,6 +124,8 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     red.prepare (sampleRate);
     oversampling.initProcessing (driveChunk);
     drive.prepare (2.0 * sampleRate);
+    driveEngaged.reset (sampleRate, 0.01);
+    driveEngaged.setCurrentAndTargetValue (0.0f);
 }
 
 void GentraAudioProcessor::reset()
@@ -132,6 +134,7 @@ void GentraAudioProcessor::reset()
     lores.reset();
     oversampling.reset();
     drive.reset();
+    driveEngaged.setCurrentAndTargetValue (0.0f);
     meterLp = 0.0f;
     black.snap();
     rust.snap();
@@ -208,16 +211,10 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     red.updateTargets();
-    if (red.active() && numChannels > 0)
+    if (numChannels > 0)
         processDrive (buffer, numChannels);
     else
-    {
-        // ponytail: при выключении сухой сигнал перескакивает с фильтров оверсэмплинга на прямой — фазовый сдвиг
-        // IIR в пару сэмплов на верхах. Если будет слышен щелчок — короткий кроссфейд обхода.
-        oversampling.reset();
-        drive.reset();
         red.skip (numSamples);
-    }
 
     // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
     if (numChannels > 0)
@@ -235,24 +232,41 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 }
 
 // Последняя в цепочке, поэтому блоком, а не в общем цикле по сэмплам: оверсэмплинг работает кусками.
+// В обходе через фильтры оверсэмплинга идёт копия входа, а буфер остаётся нетронутым (bit-perfect).
 void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
 {
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), static_cast<size_t> (numChannels),
                                         static_cast<size_t> (buffer.getNumSamples()));
+    std::array<std::array<float, driveChunk>, gentra::maxChannels> dry;
+    std::array<float*, gentra::maxChannels> dryPtrs { dry[0].data(), dry[1].data() };
 
     for (size_t start = 0; start < block.getNumSamples(); start += driveChunk)
     {
         const size_t n = juce::jmin (static_cast<size_t> (driveChunk), block.getNumSamples() - start);
-        std::array<float, driveChunk> amount {}, tone {}, wet {};
+        auto sub = block.getSubBlock (start, n);
+        juce::dsp::AudioBlock<float> dryBlock (dryPtrs.data(), static_cast<size_t> (numChannels), n);
+        dryBlock.copyFrom (sub);
+
+        driveEngaged.setTargetValue (red.active() ? 1.0f : 0.0f); // по кускам: обход наступает вовремя при любом блоке
+        if (! driveEngaged.isSmoothing() && driveEngaged.getCurrentValue() <= 0.0f)
+        {
+            red.skip (static_cast<int> (n));
+            drive.reset();
+            oversampling.processSamplesUp (dryBlock);
+            oversampling.processSamplesDown (dryBlock);
+            continue;
+        }
+
+        std::array<float, driveChunk> amount {}, tone {}, wet {}, engaged {};
         for (size_t i = 0; i < n; ++i)
         {
             amount[i] = red.next (Stage::main);
             tone[i] = red.next (Stage::extraA);
-            // Эффект плавно входит на первых процентах драйва: при 0% выход — чистый сухой сигнал.
+            // Эффект плавно входит на первых процентах драйва: при 0% выход — сухой сигнал.
             wet[i] = red.next (Stage::wet) * juce::jmin (1.0f, amount[i] / gentra::fadeIn);
+            engaged[i] = driveEngaged.getNextValue();
         }
 
-        auto sub = block.getSubBlock (start, n);
         auto up = oversampling.processSamplesUp (sub);
         for (size_t k = 0; k < up.getNumSamples(); ++k)
         {
@@ -266,6 +280,14 @@ void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int n
             }
         }
         oversampling.processSamplesDown (sub);
+
+        if (engaged[n - 1] < 1.0f || engaged[0] < 1.0f)
+            for (size_t ch = 0; ch < static_cast<size_t> (numChannels); ++ch)
+            {
+                auto* y = sub.getChannelPointer (ch);
+                for (size_t i = 0; i < n; ++i)
+                    y[i] = dry[ch][i] + engaged[i] * (y[i] - dry[ch][i]);
+            }
     }
 }
 
