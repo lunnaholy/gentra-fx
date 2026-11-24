@@ -342,7 +342,6 @@ void delayCar (double sampleRate)
     setParam (p, "delayMix", 100.0f);
     setParam (p, "delayFeedback", 0.0f);
     setParam (p, "delayTone", 100.0f);
-    setParam (p, "delayTime", 100.0f);
 
     // Тишина seconds секунд (сглаживание доезжает, линия пустеет), затем импульс; возвращает отклик.
     const auto impulse = [&] (double seconds)
@@ -359,7 +358,16 @@ void delayCar (double sampleRate)
         return out;
     };
 
-    // Без обратной связи: один повтор ровно через 100 мс, больше ничего (Mix 100% — сухого нет).
+    // По умолчанию — по нотам, 1/8; без хоста темп 120 — повтор через 0.25 с.
+    {
+        CHECK (p.apvts.getParameter ("delayNote")->getCurrentValueAsText() == "1/8");
+        const auto out = impulse (0.4);
+        CHECK (std::abs (out.getSample (0, juce::roundToInt (0.25 * sampleRate)) - 1.0f) < 1.0e-6f);
+    }
+
+    // В миллисекундах, без обратной связи: один повтор ровно через 100 мс, больше ничего (Mix 100% — сухого нет).
+    setParam (p, "delaySync", 0.0f);
+    setParam (p, "delayTime", 100.0f);
     {
         const auto out = impulse (0.3);
         const int at = juce::roundToInt (0.1 * sampleRate);
@@ -413,17 +421,16 @@ void delayCar (double sampleRate)
         CHECK (worst < 3.0 * smooth);
     }
 
-    // По темпу: 120 BPM, ручка на 1/4 — повтор через 0.5 с; хост видит «1/4».
+    // По нотам с темпом хоста: 90 BPM, нота 1/4 — повтор через 60/90 с; хост видит «1/4».
     {
         FakeHead head;
-        head.info.setBpm (120.0); // транспорт стоит, но темп хост сообщает
+        head.info.setBpm (90.0); // транспорт стоит, но темп хост сообщает
         p.setPlayHead (&head);
         setParam (p, "delaySync", 1.0f);
-        auto* time = p.apvts.getParameter ("delayTime");
-        time->setValueNotifyingHost (9.0f / 12.0f);
-        CHECK (time->getCurrentValueAsText() == "1/4");
-        const auto out = impulse (0.7);
-        CHECK (std::abs (out.getSample (0, juce::roundToInt (0.5 * sampleRate)) - 1.0f) < 1.0e-6f);
+        setParam (p, "delayNote", 9.0f);
+        CHECK (p.apvts.getParameter ("delayNote")->getCurrentValueAsText() == "1/4");
+        const auto out = impulse (0.8);
+        CHECK (std::abs (out.getSample (0, juce::roundToInt (60.0 / 90.0 * sampleRate)) - 1.0f) < 1.0e-6f);
         p.setPlayHead (nullptr);
     }
 
@@ -445,7 +452,7 @@ void automation (double sampleRate)
     const auto any = [&] (const char* id) { auto* q = p.apvts.getParameter (id); q->setValueNotifyingHost (rng.nextFloat()); };
     for (int i = 0; i < 300; ++i)
     {
-        for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
+        for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
             any (id);
         setParam (p, "delayOn", rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);

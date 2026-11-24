@@ -71,7 +71,7 @@ GentraAudioProcessor::GentraAudioProcessor()
                         "eqMid", 1.0f)),
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
       delaySync (apvts.getRawParameterValue ("delaySync")),
-      delayTimeParam (apvts.getParameter ("delayTime"))
+      delayNote (apvts.getRawParameterValue ("delayNote"))
 {
 }
 
@@ -111,17 +111,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::NormalisableRange<float> delayMs (60.0f, 600.0f, 1.0f);
     delayMs.setSkewForCentre (200.0f);
 
-    // По темпу ручка времени выбирает долю такта — и хост показывает её же, а не миллисекунды.
-    auto sync = std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delaySync", 3 }, "Delay Sync", false);
-    const auto* syncParam = sync.get();
-    auto time = std::make_unique<Float> (
-        juce::ParameterID { "delayTime", 3 }, "Delay Time", delayMs, 250.0f,
-        Attributes().withStringFromValueFunction ([syncParam, delayMs] (float ms, int)
-        {
-            if (syncParam->get())
-                return juce::String (gentra::delayDivisionNames[static_cast<size_t> (gentra::delayDivision (delayMs.convertTo0to1 (ms)))]);
-            return juce::String (juce::roundToInt (ms)) + " ms";
-        }));
+    juce::StringArray notes;
+    for (const auto* name : gentra::delayDivisionNames)
+        notes.add (name);
 
     // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом,
     // 3 — красная, белая и серебряная машины.
@@ -157,9 +149,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "delayTone", 3 }, "Delay Tone", percent, 60.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "delayMix", 3 }, "Delay Mix", percent, 30.0f, pct),
         // Дилей по умолчанию выключен: с Mix 30% он звучал бы сразу при вставке плагина.
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delayOn", 3 }, "Delay On", false)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delayOn", 3 }, "Delay On", false),
+        // По умолчанию время — длительность ноты по темпу хоста; «По такту» выключен — миллисекунды.
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delaySync", 3 }, "Delay Sync", true),
+        std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "delayNote", 3 }, "Delay Note", notes, gentra::defaultDelayDivision),
+        std::make_unique<Float> (juce::ParameterID { "delayTime", 3 }, "Delay Time", delayMs, 250.0f, Attributes().withLabel ("ms"))
     };
-    layout.add (std::move (time), std::move (sync));
     return layout;
 }
 
@@ -367,10 +362,9 @@ void GentraAudioProcessor::processEqAndDelay (juce::AudioBuffer<float>& buffer, 
         white.skip (numSamples);
     }
 
-    // По темпу — доля такта по положению ручки; время ручки (мс) тогда не нужно.
+    // По темпу — длительность выбранной ноты; время ручки (мс) тогда не нужно.
     const bool sync = delaySync->load() > 0.5f;
-    const double syncSeconds = gentra::delayDivisionBeats[static_cast<size_t> (gentra::delayDivision (delayTimeParam->getValue()))]
-                               * 60.0 / hostBpm.load (std::memory_order_relaxed);
+    const double syncSeconds = gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed));
 
     for (int n = 0; n < numSamples; ++n)
     {
@@ -415,8 +409,7 @@ double GentraAudioProcessor::getTailLengthSeconds() const
     if (apvts.getRawParameterValue ("delayOn")->load() < 0.5f || apvts.getRawParameterValue ("delayMix")->load() <= 0.0f)
         return 0.0;
     const double seconds = delaySync->load() > 0.5f
-                               ? gentra::delayDivisionBeats[static_cast<size_t> (gentra::delayDivision (delayTimeParam->getValue()))]
-                                     * 60.0 / hostBpm.load (std::memory_order_relaxed)
+                               ? gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed))
                                : apvts.getRawParameterValue ("delayTime")->load() * 0.001;
     const double feedback = apvts.getRawParameterValue ("delayFeedback")->load() * 0.01;
     const double repeats = feedback > 0.0 ? std::log (0.001) / std::log (feedback) : 0.0;

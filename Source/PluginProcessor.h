@@ -74,7 +74,7 @@ private:
 
     Stage black, rust, red, white, silver;
     std::atomic<float>* delaySync;
-    juce::RangedAudioParameter* delayTimeParam;
+    std::atomic<float>* delayNote; // индекс в gentra::delayDivisionNames
     std::atomic<double> hostBpm { 120.0 }; // последний темп хоста; без хоста — 120
     gentra::Equalizer eq;
     gentra::Delay delay;

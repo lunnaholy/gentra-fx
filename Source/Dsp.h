@@ -29,7 +29,7 @@ constexpr double eqHighHz      = 4000.0;  // шельф «Верх» эквал�
 constexpr double delayMaxSeconds = 4.0;   // длина линии дилея: 1/2 при 30 BPM
 constexpr double delayGlideTau = 0.05;    // постоянная плавной смены времени дилея, с (заметная езда ~0.2 с)
 
-// Доли такта для дилея по темпу, в четвертях: ручка времени выбирает одну из них.
+// Длительности нот для дилея по темпу, в четвертях (параметр «Нота» — индекс в этом списке).
 constexpr int numDelayDivisions = 13;
 constexpr std::array<double, numDelayDivisions> delayDivisionBeats {
     0.125, 1.0 / 6.0, 0.1875, 0.25, 1.0 / 3.0, 0.375, 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0
@@ -37,10 +37,13 @@ constexpr std::array<double, numDelayDivisions> delayDivisionBeats {
 constexpr std::array<const char*, numDelayDivisions> delayDivisionNames {
     "1/32", "1/16T", "1/32.", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "1/2T", "1/4.", "1/2"
 };
-// normalised — положение ручки времени 0..1.
-inline int delayDivision (float normalised) noexcept
+constexpr int defaultDelayDivision = 6; // 1/8
+
+// Длительность ноты в секундах при темпе bpm (четвертей в минуту); index — значение параметра «Нота».
+inline double delayDivisionSeconds (float index, double bpm) noexcept
 {
-    return std::clamp (static_cast<int> (std::lround (normalised * (numDelayDivisions - 1))), 0, numDelayDivisions - 1);
+    const int i = std::clamp (static_cast<int> (std::lround (index)), 0, numDelayDivisions - 1);
+    return delayDivisionBeats[static_cast<size_t> (i)] * 60.0 / bpm;
 }
 
 constexpr double pi = 3.14159265358979323846;
