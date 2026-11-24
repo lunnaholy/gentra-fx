@@ -81,7 +81,7 @@ void Box::paint (juce::Graphics& g)
 // ---------------- редактор ----------------
 
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
-    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts)
+    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); })
 {
     setLookAndFeel (&look);
     addAndMakeVisible (road);

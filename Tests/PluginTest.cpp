@@ -192,7 +192,22 @@ void run (double sampleRate)
         CHECK (transparent (p, rng));
     }
 
-    // 9. Состояние переживает сохранение/загрузку.
+    // 9. Метр низа: бочка 50 Гц видна, тишина — ноль.
+    {
+        p.takeBassLevel();
+        juce::AudioBuffer<float> buf (2, 4096);
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+            for (int ch = 0; ch < 2; ++ch)
+                buf.setSample (ch, n, 0.8f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 50.0 * n / sampleRate)));
+        p.processBlock (buf, midi);
+        CHECK (p.takeBassLevel() > 0.5f);
+        buf.clear();
+        p.reset();
+        p.processBlock (buf, midi);
+        CHECK (p.takeBassLevel() <= 0.0f);
+    }
+
+    // 10. Состояние переживает сохранение/загрузку.
     setParam (p, "bass", 37.0f);
     setParam (p, "lores", 82.0f);
     juce::MemoryBlock state;

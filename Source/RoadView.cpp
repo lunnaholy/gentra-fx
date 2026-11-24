@@ -24,6 +24,8 @@ constexpr float wheelY = 0.074f; // центр колеса над асфаль�
 constexpr float wheelR = 0.087f; // радиус колеса
 // 2 — крупный пиксель, как в прототипе. Для реалистичных фото поставьте 1.
 constexpr int pixelScale = 2;
+// Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
+constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 // =======================================================================
 
 constexpr float W = static_cast<float> (RoadView::width);
@@ -119,8 +121,8 @@ const std::array<RoadView::Working, RoadView::numWorking> RoadView::working { {
 juce::String RoadView::effectName (int car) { return ru (carInfo[static_cast<size_t> (car)].name); }
 juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[static_cast<size_t> (car)].colour); }
 
-RoadView::RoadView (juce::AudioProcessorValueTreeState& state)
-    : apvts (state),
+RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level)
+    : apvts (state), bassLevel (std::move (level)),
       sky (asset ("sky_png")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
       road (asset ("road_png")), lamp (asset ("lamp_png")), props (asset ("props_png")),
       wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")),
@@ -313,6 +315,11 @@ void RoadView::advance (float dt)
     focusY = juce::jmap (focus, H * 0.5f, lastFocusY);
     centreY = juce::jmap (focus, H * 0.5f, H * 0.47f);
 
+    // Тряска: мгновенная атака, экспоненциальный спад. Земля прыгает сильнее, чем ездит вбок.
+    const float level = bassLevel != nullptr ? juce::jlimit (0.0f, 1.0f, bassLevel()) : 0.0f;
+    rumble = juce::jmax (level, rumble * std::exp (-dt / shakeRelease));
+    shake = { rumble * shakePx * 0.4f * (rng.nextFloat() * 2.0f - 1.0f), rumble * shakePx * (rng.nextFloat() * 2.0f - 1.0f) };
+
     place();
     repaint();
 }
@@ -331,7 +338,7 @@ void RoadView::place()
 
 juce::Point<float> RoadView::toScreen (float worldX, float worldY) const
 {
-    return { (worldX - W * 0.5f) * zoom + W * 0.5f, (worldY - focusY) * zoom + centreY };
+    return { (worldX - W * 0.5f) * zoom + W * 0.5f + shake.x, (worldY - focusY) * zoom + centreY + shake.y };
 }
 
 juce::Point<float> RoadView::wheelCentre (int w) const
@@ -353,8 +360,8 @@ bool RoadView::knobsVisible() const
 
 int RoadView::carAt (juce::Point<float> p) const
 {
-    const float x = (p.x - W * 0.5f) / zoom + W * 0.5f;
-    const float y = (p.y - centreY) / zoom + focusY;
+    const float x = (p.x - shake.x - W * 0.5f) / zoom + W * 0.5f;
+    const float y = (p.y - shake.y - centreY) / zoom + focusY;
 
     int best = -1;
     for (int i = 0; i < numCars; ++i) // ближние полосы перекрывают дальние
@@ -503,8 +510,10 @@ void RoadView::drawScene (juce::Graphics& g) const
     }
 
     juce::Graphics::ScopedSaveState save (g);
-    g.addTransform (juce::AffineTransform::translation (-W * 0.5f, -focusY).scaled (zoom).translated (W * 0.5f, centreY));
-    const float x0 = W * 0.5f - W * 0.5f / zoom - 2.0f, x1 = W * 0.5f + W * 0.5f / zoom + 2.0f;
+    // Земля и машины трясутся, небо и город — нет.
+    g.addTransform (juce::AffineTransform::translation (-W * 0.5f, -focusY).scaled (zoom).translated (W * 0.5f + shake.x, centreY + shake.y));
+    const float margin = 2.0f + shakePx / zoom;
+    const float x0 = W * 0.5f - W * 0.5f / zoom - margin, x1 = W * 0.5f + W * 0.5f / zoom + margin;
 
     drawStrip (g, road, ground, 1440.0f, 1440.0f, 387.0f, roadTop - 7.0f, x0, x1);
     drawStrip (g, props, ground * 1.1f, 1200.0f, 1200.0f, 80.0f, roadBottom + 40.0f - 60.0f, x0, x1);

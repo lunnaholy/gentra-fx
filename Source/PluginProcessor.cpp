@@ -111,6 +111,8 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     bass.prepare (sampleRate);
     lores.prepare (sampleRate);
+    meterCoeff = static_cast<float> (std::exp (-2.0 * gentra::pi * 150.0 / sampleRate));
+    meterLp = 0.0f;
     black.prepare (sampleRate);
     rust.prepare (sampleRate);
 }
@@ -119,6 +121,7 @@ void GentraAudioProcessor::reset()
 {
     bass.reset();
     lores.reset();
+    meterLp = 0.0f;
     black.snap();
     rust.snap();
 }
@@ -154,13 +157,10 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         lores.reset();
         rust.skip (numSamples);
     }
-    if (! bassOn && ! loresOn)
-        return;
-
     const int numChannels = juce::jmin (buffer.getNumChannels(), gentra::maxChannels);
     auto* const* data = buffer.getArrayOfWritePointers();
 
-    for (int n = 0; n < numSamples; ++n)
+    for (int n = 0; (bassOn || loresOn) && n < numSamples; ++n)
     {
         if (bassOn)
         {
@@ -192,6 +192,20 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 data[ch][n] = wet * lores.processSample (ch, x, capture) + (1.0f - wet) * x;
             }
         }
+    }
+
+    // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
+    if (numChannels > 0)
+    {
+        float peak = 0.0f;
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float mono = numChannels > 1 ? 0.5f * (data[0][n] + data[1][n]) : data[0][n];
+            meterLp = mono + meterCoeff * (meterLp - mono);
+            peak = juce::jmax (peak, std::abs (meterLp));
+        }
+        if (peak > bassLevel.load (std::memory_order_relaxed))
+            bassLevel.store (peak, std::memory_order_relaxed);
     }
 }
 

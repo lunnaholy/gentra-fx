@@ -27,7 +27,8 @@ public:
     static juce::String effectName (int car);
     static juce::Colour bodyColour (int car);
 
-    explicit RoadView (juce::AudioProcessorValueTreeState&);
+    // bassLevel — откуда брать уровень низа для тряски (вызывается раз в кадр на message thread).
+    RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel);
 
     void select (int car); // -1 — ничего не выбрано
     int getSelected() const noexcept { return selected; }
@@ -74,6 +75,7 @@ private:
     void drawOverlays (juce::Graphics&) const;
 
     juce::AudioProcessorValueTreeState& apvts;
+    std::function<float()> bassLevel;
 
     std::array<juce::Image, numCars> bodies;
     juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate;
@@ -85,6 +87,8 @@ private:
     float time = 0.0f, scroll = 0.0f, camX, camU = 0.0f;
     float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
     double lastTick = 0.0;
+    float rumble = 0.0f;            // огибающая низа
+    juce::Point<float> shake;       // смещение земли и машин в этом кадре
 
     struct Drag
     {

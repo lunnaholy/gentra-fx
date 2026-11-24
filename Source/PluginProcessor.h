@@ -35,6 +35,9 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // Пик низа (< ~150 Гц) на выходе с прошлого вызова — для тряски дороги в интерфейсе.
+    float takeBassLevel() noexcept { return bassLevel.exchange (0.0f); }
+
 private:
     // Сглаженные параметры одной машины: главная ручка, два доп. параметра, итоговый wet (Mix с учётом вкл/выкл).
     struct Stage
@@ -63,6 +66,9 @@ private:
     Stage black, rust;
     gentra::BassBoost bass;
     gentra::LoRes lores;
+
+    std::atomic<float> bassLevel { 0.0f };
+    float meterLp = 0.0f, meterCoeff = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GentraAudioProcessor)
 };
