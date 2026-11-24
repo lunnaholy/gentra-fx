@@ -65,13 +65,7 @@ const std::array<CarInfo, RoadView::numCars> carInfo { {
 } };
 enum { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yellow, white };
 
-juce::Image asset (const char* name)
-{
-    int size = 0;
-    const char* data = BinaryData::getNamedResource (name, size);
-    jassert (data != nullptr);
-    return data != nullptr ? juce::ImageFileFormat::loadFrom (data, static_cast<size_t> (size)) : juce::Image();
-}
+juce::Image asset (const char* name) { return RoadView::image (name); }
 
 float posMod (float a, float n)
 {
@@ -118,6 +112,22 @@ const std::array<RoadView::Working, RoadView::numWorking> RoadView::working { {
     { "lores", "LO-RES", "loresMix", "loresOn" },
 } };
 
+juce::Image RoadView::image (const char* name)
+{
+    int size = 0;
+    const char* data = BinaryData::getNamedResource (name, size);
+    jassert (data != nullptr);
+    return data != nullptr ? juce::ImageFileFormat::loadFrom (data, static_cast<size_t> (size)) : juce::Image();
+}
+
+juce::Font RoadView::font (float size)
+{
+    // PT Sans Narrow Bold (ParaType Free Font License — можно вшивать), вшит из Assets/.
+    static const auto typeface = juce::Typeface::createSystemTypefaceFor (BinaryData::PTSansNarrowBold_ttf,
+                                                                         static_cast<size_t> (BinaryData::PTSansNarrowBold_ttfSize));
+    return juce::FontOptions (typeface).withHeight (size);
+}
+
 juce::String RoadView::effectName (int car) { return ru (carInfo[static_cast<size_t> (car)].name); }
 juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[static_cast<size_t> (car)].colour); }
 
@@ -125,7 +135,7 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
     : apvts (state), bassLevel (std::move (level)),
       sky (asset ("sky_png")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
       road (asset ("road_png")), lamp (asset ("lamp_png")), props (asset ("props_png")),
-      wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")),
+      wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
       camX (span * 0.5f), focusY (H * 0.5f), centreY (H * 0.5f), lastFocusY (H * 0.5f)
 {
     for (size_t i = 0; i < cars.size(); ++i)
@@ -710,26 +720,30 @@ void RoadView::drawOverlays (juce::Graphics& g) const
         if (tagCar >= numWorking)
             text << ru (" · скоро");
 
-        const juce::Font font (juce::FontOptions ("Arial", 13.0f, juce::Font::bold));
-        const float tw = juce::GlyphArrangement::getStringWidth (font, text) + 20.0f;
+        const auto f = font (17.0f);
+        const float th = 30.0f, tw = juce::GlyphArrangement::getStringWidth (f, text) + 40.0f;
         const auto top = toScreen (c.px, c.py - 0.36f * carLen * c.sc);
-        const juce::Rectangle<float> box (juce::jlimit (60.0f, W - 60.0f, top.x) - tw * 0.5f, top.y - 8.0f - 24.0f, tw, 24.0f);
+        const juce::Rectangle<float> box (juce::jlimit (70.0f, W - 70.0f, top.x) - tw * 0.5f, top.y - 6.0f - th, tw, th);
 
         juce::Graphics::ScopedSaveState s (g);
         g.addTransform (juce::AffineTransform::rotation (-1.5f * pi / 180.0f, box.getCentreX(), box.getCentreY()));
-        g.setColour (juce::Colours::white);
-        g.fillRect (box);
-        g.setColour (juce::Colours::black);
-        g.drawRect (box, 3.0f);
-        g.setFont (font);
+        // Лента: рваные края как есть, середина тянется под длину текста.
+        const int iw = tag.getWidth(), ih = tag.getHeight(), edge = iw / 8;
+        const float e = static_cast<float> (edge) * th / static_cast<float> (ih);
+        g.setOpacity (1.0f);
+        g.drawImage (tag.getClippedImage ({ 0, 0, edge, ih }), box.withWidth (e));
+        g.drawImage (tag.getClippedImage ({ edge, 0, iw - 2 * edge, ih }), box.reduced (e, 0.0f));
+        g.drawImage (tag.getClippedImage ({ iw - edge, 0, edge, ih }), box.withLeft (box.getRight() - e));
+        g.setColour (juce::Colour (0xff15161a));
+        g.setFont (f);
         g.drawText (text, box, juce::Justification::centred);
     }
 
     // Подписи под колёсами-ручками
     if (knobsVisible())
     {
-        const juce::Font labelFont (juce::FontOptions ("Arial", 13.0f, juce::Font::bold));
-        const juce::Font valueFont (juce::FontOptions ("Arial", 16.0f, juce::Font::bold));
+        const auto labelFont = font (15.0f);
+        const auto valueFont = font (19.0f);
 
         for (int w = 0; w < 2; ++w)
         {

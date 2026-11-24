@@ -2,10 +2,6 @@
 
 namespace
 {
-const juce::Colour boxGrey { 0xffd9d9d9 };
-const juce::Colour hot { 0xffffff00 };
-const juce::Colour yes { 0xff35c435 };
-const juce::Colour no { 0xffe23b3b };
 constexpr float degrees = juce::MathConstants<float>::pi / 180.0f;
 
 juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
@@ -33,10 +29,6 @@ void rotate (juce::Component& c, float deg)
 
 BoxLook::BoxLook()
 {
-    setColour (juce::TextButton::buttonColourId, juce::Colours::white);
-    setColour (juce::TextButton::buttonOnColourId, juce::Colours::white);
-    setColour (juce::TextButton::textColourOffId, juce::Colours::black);
-    setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     setColour (juce::Label::textColourId, juce::Colours::black);
     setColour (juce::Slider::backgroundColourId, juce::Colours::white);
     setColour (juce::Slider::trackColourId, juce::Colours::black);
@@ -46,30 +38,14 @@ BoxLook::BoxLook()
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
 }
 
-void BoxLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& colour, bool, bool down)
-{
-    const auto r = b.getLocalBounds().toFloat();
-    g.setColour (down ? hot : colour);
-    g.fillRect (r);
-    g.setColour (b.isEnabled() ? juce::Colours::black : juce::Colours::grey);
-    g.drawRect (r, 2.0f);
-}
-
-juce::Font BoxLook::getTextButtonFont (juce::TextButton&, int)
-{
-    return juce::FontOptions ("Arial", 14.0f, juce::Font::bold);
-}
-
 juce::Font BoxLook::getLabelFont (juce::Label&)
 {
-    return juce::FontOptions ("Arial", 13.0f, juce::Font::bold);
+    return RoadView::font (16.0f);
 }
 
 void Box::paint (juce::Graphics& g)
 {
-    g.fillAll (boxGrey);
-    g.setColour (juce::Colours::black);
-    g.drawRect (getLocalBounds(), 3);
+    g.drawImage (image, getLocalBounds().toFloat());
 }
 
 // ---------------- редактор ----------------
@@ -82,10 +58,15 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     road.onSelectionChanged = [this] (int car) { showPopup (car); };
 
     // Всплывающая коробка открытой машины.
+    // Тумблер: «выкл» в обычном состоянии, «вкл» — во включённом (ImageButton берёт down-картинку).
+    const auto off = RoadView::image ("switch_off_png"), on = RoadView::image ("switch_on_png");
+    const auto shade = juce::Colours::black.withAlpha (0.15f);
     onButton.setClickingTogglesState (true);
-    onButton.setColour (juce::TextButton::buttonColourId, no);
-    onButton.setColour (juce::TextButton::buttonOnColourId, yes);
-    onButton.onStateChange = [this] { updateOnButton(); };
+    onButton.setImages (false, true, true, off, 1.0f, {}, off, 1.0f, shade, on, 1.0f, {});
+    const auto close = RoadView::image ("close_png");
+    closeButton.setImages (false, true, true, close, 1.0f, {}, close, 1.0f, shade, close, 1.0f, juce::Colours::black.withAlpha (0.3f));
+    onButton.setTitle (ru ("Включен"));
+    closeButton.setTitle (ru ("Закрыть"));
     closeButton.onClick = [this] { road.select (-1); };
     popup.addAndMakeVisible (onButton);
     popup.addAndMakeVisible (closeButton);
@@ -115,15 +96,16 @@ void GentraAudioProcessorEditor::resized()
     road.setBounds (getLocalBounds());
 
     popup.setTransform ({});
-    popup.setBounds ((getWidth() - 300) / 2, getHeight() - 9 - 96, 300, 96);
-    onButton.setBounds (8, 8, 244, 28);
-    closeButton.setBounds (258, 8, 34, 28);
+    // Пропорции — как у panel.png (760×213); винты в углах, поэтому поля по 34.
+    popup.setBounds ((getWidth() - 380) / 2, getHeight() - 8 - 106, 380, 106);
+    onButton.setBounds (34, 12, 151, 30);
+    closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
     for (int i = 0; i < 2; ++i)
     {
         auto& row = rows[static_cast<size_t> (i)];
-        const int y = 42 + i * 25;
-        row.label.setBounds (6, y, 86, 22);
-        row.slider.setBounds (92, y, 202, 22);
+        const int y = 48 + i * 24;
+        row.label.setBounds (34, y, 88, 22);
+        row.slider.setBounds (122, y, 224, 22);
     }
     rotate (popup, -0.6f);
 }
@@ -141,7 +123,6 @@ void GentraAudioProcessorEditor::showPopup (int car)
     auto& apvts = gentraProcessor.apvts;
     onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         apvts, RoadView::working[static_cast<size_t> (car)].on, onButton);
-    updateOnButton();
 
     for (size_t i = 0; i < rows.size(); ++i)
     {
@@ -154,10 +135,4 @@ void GentraAudioProcessorEditor::showPopup (int car)
         row.slider.setTitle (ru (extra.label));
         row.slider.updateText();
     }
-}
-
-void GentraAudioProcessorEditor::updateOnButton()
-{
-    onButton.setButtonText (onButton.getToggleState() ? ru ("Включен") : ru ("Выключен"));
-    onButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
 }

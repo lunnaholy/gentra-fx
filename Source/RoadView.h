@@ -26,6 +26,8 @@ public:
 
     static juce::String effectName (int car);
     static juce::Colour bodyColour (int car);
+    static juce::Image image (const char* binaryDataName); // PNG из Assets/
+    static juce::Font font (float size);                   // шрифт интерфейса
 
     // bassLevel — откуда брать уровень низа для тряски (вызывается раз в кадр на message thread).
     RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel);
@@ -78,7 +80,7 @@ private:
     std::function<float()> bassLevel;
 
     std::array<juce::Image, numCars> bodies;
-    juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate;
+    juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate, tag;
     juce::Image frame; // сцена в пониженном разрешении («крупный пиксель»)
 
     std::array<Car, numCars> cars;

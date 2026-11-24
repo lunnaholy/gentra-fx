@@ -50,7 +50,7 @@ target_sources(SauceGentraFX PRIVATE
 target_compile_options(SauceGentraFX PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 # Графика интерфейса: замените PNG в Assets/ своими и пересоберите (список имён — в Source/RoadView.cpp).
-file(GLOB GENTRA_ASSETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.png)
+file(GLOB GENTRA_ASSETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.png ${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.ttf)
 juce_add_binary_data(GentraAssets SOURCES ${GENTRA_ASSETS})
 
 target_compile_definitions(SauceGentraFX PUBLIC

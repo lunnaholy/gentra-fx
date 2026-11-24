@@ -3,19 +3,18 @@
 #include "PluginProcessor.h"
 #include "RoadView.h"
 
-// Стиль коробок из прототипа: серый фон, чёрная обводка, белые кнопки, жёлтый при нажатии.
+// Стиль всплывающей таблички: шрифт интерфейса, чёрный текст и ползунки.
 struct BoxLook final : juce::LookAndFeel_V4
 {
     BoxLook();
-    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
-    juce::Font getTextButtonFont (juce::TextButton&, int) override;
     juce::Font getLabelFont (juce::Label&) override;
 };
 
-// Серая коробка с чёрной обводкой; дети раскладываются снаружи.
+// Металлическая табличка (panel.png); дети раскладываются снаружи.
 struct Box final : juce::Component
 {
     void paint (juce::Graphics&) override;
+    juce::Image image = RoadView::image ("panel_png");
 };
 
 class GentraAudioProcessorEditor final : public juce::AudioProcessorEditor
@@ -39,7 +38,6 @@ private:
     };
 
     void showPopup (int car);
-    void updateOnButton();
 
     GentraAudioProcessor& gentraProcessor;
     BoxLook look;
@@ -47,7 +45,7 @@ private:
     RoadView road;
 
     Box popup;
-    juce::TextButton onButton, closeButton { "X" };
+    juce::ImageButton onButton, closeButton;
     std::array<Row, 2> rows;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 
