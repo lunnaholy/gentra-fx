@@ -15,14 +15,21 @@ namespace
 //   road.jpg           1333×390  дорога от верха бордюра (y = 184.5) вниз, бесшовно; полосы — laneY()
 //   lamp.png           40×150    фонарь, повторяется каждые 280, низ = верх дороги
 //   props.png          740×90    обочина, бесшовно; земля на 88 от верха
-//   car_<цвет>.png     кузов сбоку без колёс, нос вправо; ширина = длина машины, низ = асфальт
+//   car_<цвет>.png     кузов сбоку без колёс, нос вправо; ширина = длина машины, низ = асфальт;
+//                      пропорции любые, колёса и огни — в Geo у машины (carInfo ниже);
+//                      фото без колёс готовит и меряет Tools/skin.py
 //   wheel.png          колесо анфас, квадрат, колесо вписано в края
-//   tint.png, rust.png накладки того же размера, что car_black / car_rust: тонировка, ржавчина
+//   tint.png, rust.png накладки тонировки и ржавчины, обрезаются по силуэту car_black / car_rust
 //   plate.png          190×36    номер в углу
-// Положение колёс на кузове — в долях длины машины:
-constexpr float rearWheelX = 0.222f, frontWheelX = 0.81f;
-constexpr float wheelY = 0.083f; // центр колеса над асфальтом
-constexpr float wheelR = 0.083f; // радиус колеса
+// Колёса и огни на кузове — в долях длины машины: x от зада к носу, y вверх от асфальта.
+struct Spot { float x, y; };
+struct Geo
+{
+    float rearX, frontX, wheelY, wheelR; // центры колёс по x, центр над асфальтом, радиус
+    Spot head, tail, side, exhaust;      // фара, стоп, повторитель поворота, выхлоп
+};
+// Старый общий кузов 800×288.
+constexpr Geo stock { 0.222f, 0.81f, 0.083f, 0.083f, { 0.934f, 0.185f }, { 0.05f, 0.227f }, { 0.731f, 0.2f }, { 0.035f, 0.095f } };
 // Горы крупнее картинки, чтобы выглядывать из-за города (город ~187 px, низкая застройка ~60 px).
 constexpr float mountainScale = 2.5f;
 // Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
@@ -64,13 +71,18 @@ struct CarInfo
     juce::uint32 colour;
     bool on;        // для декоративных
     float strength; // для декоративных: сила «эффекта» = скорость
+    Geo geo = stock;
 };
 
 // Порядок и значения — как в прототипе.
 const std::array<CarInfo, RoadView::numCars> carInfo { {
     { "car_black_png", "Саб и тонировка", 0xff1b1c21, true, 0.0f },
-    { "car_rust_png", "Low-res", 0xffb7a688, true, 0.0f },
-    { "car_red_png", "Дисторшн", 0xffb3202a, true, 0.2475f },
+    // Приора
+    { "car_rust_png", "Low-res", 0xffb7a688, true, 0.0f,
+      { 0.2178f, 0.8106f, 0.0821f, 0.0819f, { 0.94f, 0.2f }, { 0.04f, 0.215f }, { 0.73f, 0.193f }, { 0.05f, 0.105f } } },
+    // Жигули
+    { "car_red_png", "Дисторшн", 0xffb3202a, true, 0.2475f,
+      { 0.2274f, 0.838f, 0.083f, 0.0831f, { 0.978f, 0.198f }, { 0.018f, 0.2f }, { 0.937f, 0.208f }, { 0.05f, 0.085f } } },
     { "car_green_png", "Питчер", 0xff1f8a3b, false, 0.0f },
     { "car_orange_png", "Форманта", 0xfff07a13, false, 0.0f },
     { "car_purple_png", "Гармонайзер", 0xff7a2bbf, true, 0.35f },
@@ -78,9 +90,34 @@ const std::array<CarInfo, RoadView::numCars> carInfo { {
     { "car_pink_png", "Фэйзер", 0xffff5fa2, false, 0.0f },
     { "car_silver_png", "Дилей", 0xffa3acb6, true, 0.15f },
     { "car_grey_png", "Реверб", 0xff4d545c, true, 0.165f },
-    { "car_yellow_png", "Гейт", 0xfff2c230, false, 0.0f },
-    { "car_white_png", "Эквалайзер", 0xffeef0f2, true, 0.1667f },
+    // Zeekr 007: повторитель в зеркале
+    { "car_yellow_png", "Гейт", 0xfff2c230, false, 0.0f,
+      { 0.2022f, 0.8081f, 0.0869f, 0.0871f, { 0.94f, 0.186f }, { 0.06f, 0.212f }, { 0.645f, 0.232f }, { 0.05f, 0.09f } } },
+    // Нексия
+    { "car_white_png", "Эквалайзер", 0xffeef0f2, true, 0.1667f,
+      { 0.2222f, 0.8143f, 0.0799f, 0.0802f, { 0.947f, 0.183f }, { 0.038f, 0.205f }, { 0.737f, 0.197f }, { 0.05f, 0.1f } } },
 } };
+
+const Geo& geo (int car) { return carInfo[static_cast<size_t> (car)].geo; }
+
+// Накладка, подогнанная под кузов: растянута в его рамку и видна только там, где кузов непрозрачен.
+juce::Image clipTo (const juce::Image& overlay, const juce::Image& body)
+{
+    if (! overlay.isValid() || ! body.isValid())
+        return overlay;
+    juce::Image out (juce::Image::ARGB, body.getWidth(), body.getHeight(), true);
+    {
+        juce::Graphics g (out);
+        g.drawImage (overlay, out.getBounds().toFloat());
+    }
+    const auto argb = body.convertedToFormat (juce::Image::ARGB);
+    const juce::Image::BitmapData src (argb, juce::Image::BitmapData::readOnly);
+    juce::Image::BitmapData dst (out, juce::Image::BitmapData::readWrite);
+    for (int y = 0; y < out.getHeight(); ++y)
+        for (int x = 0; x < out.getWidth(); ++x)
+            dst.setPixelColour (x, y, dst.getPixelColour (x, y).withMultipliedAlpha (src.getPixelColour (x, y).getFloatAlpha()));
+    return out;
+}
 enum { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yellow, white };
 
 juce::Image asset (const char* name) { return RoadView::image (name); }
@@ -178,6 +215,8 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
         c.lp = static_cast<float> (c.lane);
         c.x = (static_cast<float> (i) + 0.5f) * span / static_cast<float> (numCars);
     }
+    tint = clipTo (tint, bodies[black]);
+    rust = clipTo (rust, bodies[rustCar]);
 
     hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden));
     place();
@@ -229,11 +268,12 @@ void RoadView::drawThumbnail (juce::Graphics& g, int car, juce::Rectangle<float>
     juce::Graphics::ScopedSaveState s (g);
     drawInCarUnits (g, body, alpha, toArea);
     const float ww = static_cast<float> (juce::jmax (1, wheel.getWidth())), wh = static_cast<float> (juce::jmax (1, wheel.getHeight()));
+    const auto& k = geo (car);
     g.setOpacity (alpha);
-    for (float wx : { rearWheelX, frontWheelX })
+    for (float wx : { k.rearX, k.frontX })
         g.drawImageTransformed (wheel, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
-                                           .scaled (2.0f * wheelR / ww, -2.0f * wheelR / wh)
-                                           .translated (wx, wheelY)
+                                           .scaled (2.0f * k.wheelR / ww, -2.0f * k.wheelR / wh)
+                                           .translated (wx, k.wheelY)
                                            .followedBy (toArea));
 }
 
@@ -571,13 +611,20 @@ juce::Point<float> RoadView::toScreen (float worldX, float worldY) const
 juce::Point<float> RoadView::wheelCentre (int w) const
 {
     const auto& c = cars[static_cast<size_t> (selected)];
-    const float x = w == 0 ? rearWheelX : frontWheelX;
-    return toScreen (c.px + (x - 0.5f) * carLen * c.sc, c.py - wheelY * carLen * c.sc);
+    const auto& k = geo (selected);
+    const float x = w == 0 ? k.rearX : k.frontX;
+    return toScreen (c.px + (x - 0.5f) * carLen * c.sc, c.py - k.wheelY * carLen * c.sc);
 }
 
 float RoadView::wheelHitRadius() const
 {
-    return 0.07f * carLen * cars[static_cast<size_t> (selected)].sc * zoom * 1.7f;
+    return 0.84f * geo (selected).wheelR * carLen * cars[static_cast<size_t> (selected)].sc * zoom * 1.7f;
+}
+
+float RoadView::bodyHeight (int car) const
+{
+    const auto& body = bodies[static_cast<size_t> (car)];
+    return static_cast<float> (body.getHeight()) / static_cast<float> (juce::jmax (1, body.getWidth()));
 }
 
 bool RoadView::knobsVisible() const
@@ -597,7 +644,7 @@ int RoadView::carAt (juce::Point<float> p) const
             continue;
         const auto& c = cars[static_cast<size_t> (i)];
         const float half = carLen * c.sc * 0.6f;
-        if (std::abs (wrap (x - c.px)) < half && y < c.py + 10.0f && y > c.py - 0.42f * carLen * c.sc
+        if (std::abs (wrap (x - c.px)) < half && y < c.py + 10.0f && y > c.py - (bodyHeight (i) + 0.06f) * carLen * c.sc
             && (best < 0 || c.lp > cars[static_cast<size_t> (best)].lp))
             best = i;
     }
@@ -763,6 +810,7 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     const auto& body = bodies[static_cast<size_t> (i)];
     const bool on = isOn (i);
     const float phase = pulse;
+    const auto& k = geo (i);
 
     juce::Graphics::ScopedSaveState save (g);
     // Дальше всё в единицах машины: x 0..1 от зада к носу, y вверх от асфальта.
@@ -786,11 +834,12 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     {
         // Пламя из выхлопа: длина от драйва, яркость пламени не зависит от Mix.
         const float len = (0.05f + 0.4f * param ("drive") * 0.01f) * (0.8f + 0.2f * std::sin (time * 40.0f));
-        juce::ColourGradient flame (juce::Colour (0xfffff2a8), 0.03f, 0.0f, rgba (255, 60, 0, 0.0f), 0.03f - len, 0.0f, false);
+        const auto e = k.exhaust;
+        juce::ColourGradient flame (juce::Colour (0xfffff2a8), e.x - 0.005f, 0.0f, rgba (255, 60, 0, 0.0f), e.x - 0.005f - len, 0.0f, false);
         flame.addColour (0.4, juce::Colour (0xffff8a1f));
         g.setGradientFill (flame);
         juce::Path p;
-        p.addTriangle (0.04f, 0.07f, 0.03f - len, 0.095f, 0.04f, 0.12f);
+        p.addTriangle (e.x + 0.005f, e.y - 0.025f, e.x - 0.005f - len, e.y, e.x + 0.005f, e.y + 0.025f);
         g.fillPath (p);
     }
     else if (i == blue)
@@ -843,14 +892,15 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     {
         // Белая включена — фары ярче, и чем сильнее эквалайзер, тем ярче.
         const float beamAlpha = i == white && on ? 0.3f + 0.25f * strength (white) : 0.16f;
-        juce::ColourGradient beam (rgba (255, 240, 190, beamAlpha), 0.95f, 0.0f,
-                                   rgba (255, 240, 190, 0.0f), 1.6f, 0.0f, false);
+        const float x = k.head.x + 0.016f, y = k.head.y;
+        juce::ColourGradient beam (rgba (255, 240, 190, beamAlpha), x, 0.0f,
+                                   rgba (255, 240, 190, 0.0f), x + 0.65f, 0.0f, false);
         g.setGradientFill (beam);
         juce::Path p;
-        p.startNewSubPath (0.95f, 0.2f);
-        p.lineTo (1.6f, 0.22f);
-        p.lineTo (1.6f, -0.02f);
-        p.lineTo (0.95f, 0.16f);
+        p.startNewSubPath (x, y + 0.015f);
+        p.lineTo (x + 0.65f, y + 0.035f);
+        p.lineTo (x + 0.65f, -0.02f);
+        p.lineTo (x, y - 0.025f);
         p.closeSubPath();
         g.fillPath (p);
     }
@@ -878,14 +928,14 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         const float wh = static_cast<float> (juce::jmax (1, wheel.getHeight()));
         for (int w = 0; w < 2; ++w)
         {
-            const float wx = w == 0 ? rearWheelX : frontWheelX;
+            const float wx = w == 0 ? k.rearX : k.frontX, wy = k.wheelY, arcR = 1.2f * k.wheelR;
             // Колесо-ручка повёрнуто на своё значение, обычное — катится.
             const float angle = knobs ? knob[w] * 1.5f * pi : c.spin;
             g.setOpacity (alpha);
             g.drawImageTransformed (wheel, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
-                                               .scaled (2.0f * wheelR / ww, -2.0f * wheelR / wh)
+                                               .scaled (2.0f * k.wheelR / ww, -2.0f * k.wheelR / wh)
                                                .rotated (-angle)
-                                               .translated (wx, wheelY));
+                                               .translated (wx, wy));
 
             if (knobs)
             {
@@ -895,7 +945,7 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
                     for (int n = 0; n <= 24; ++n)
                     {
                         const float a = (-135.0f + 270.0f * (from + (to - from) * static_cast<float> (n) / 24.0f)) * pi / 180.0f;
-                        const juce::Point<float> pt (wx + 0.1f * std::sin (a), wheelY + 0.1f * std::cos (a));
+                        const juce::Point<float> pt (wx + arcR * std::sin (a), wy + arcR * std::cos (a));
                         if (n == 0) p.startNewSubPath (pt);
                         else p.lineTo (pt);
                     }
@@ -917,32 +967,32 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.setGradientFill (juce::ColourGradient (colour, x, y, colour.withAlpha (0.0f), x + r, y, true));
         g.fillEllipse (x - r, y - r, 2.0f * r, 2.0f * r);
     };
-    glow (0.934f, 0.185f, i == white && on ? 0.12f + 0.06f * strength (white) : 0.09f, rgba (255, 240, 180, 0.55f));
-    glow (0.05f, 0.227f, 0.06f, rgba (255, 40, 40, 0.5f));
+    glow (k.head.x, k.head.y, i == white && on ? 0.12f + 0.06f * strength (white) : 0.09f, rgba (255, 240, 180, 0.55f));
+    glow (k.tail.x, k.tail.y, 0.06f, rgba (255, 40, 40, 0.5f));
 
     // Ждёт, пока уступят, — стробит дальним: чистый белый, огромный ореол и луч.
     if (c.waiting > flashDelay && std::fmod (time * flashRate, 1.0f) < 0.5f)
     {
-        juce::ColourGradient beam (juce::Colours::white, 0.95f, 0.0f, juce::Colours::white.withAlpha (0.0f), 2.2f, 0.0f, false);
+        const float x = k.head.x + 0.016f, y = k.head.y;
+        juce::ColourGradient beam (juce::Colours::white, x, 0.0f, juce::Colours::white.withAlpha (0.0f), x + 1.25f, 0.0f, false);
         g.setGradientFill (beam);
         juce::Path p;
-        p.startNewSubPath (0.95f, 0.21f);
-        p.lineTo (2.2f, 0.4f);
-        p.lineTo (2.2f, -0.1f);
-        p.lineTo (0.95f, 0.15f);
+        p.startNewSubPath (x, y + 0.025f);
+        p.lineTo (x + 1.25f, y + 0.215f);
+        p.lineTo (x + 1.25f, y - 0.285f);
+        p.lineTo (x, y - 0.035f);
         p.closeSubPath();
         g.fillPath (p);
-        glow (0.934f, 0.185f, 0.32f, juce::Colours::white);
-        glow (0.934f, 0.185f, 0.1f, juce::Colours::white);
+        glow (k.head.x, k.head.y, 0.32f, juce::Colours::white);
+        glow (k.head.x, k.head.y, 0.1f, juce::Colours::white);
     }
 
     // Выключенная машина мигает аварийкой
     if (! on && phase < 0.5f)
     {
         g.setColour (juce::Colour (0xffff9d1c));
-        g.fillEllipse (0.934f - 0.018f, 0.185f - 0.018f, 0.036f, 0.036f);
-        g.fillEllipse (0.05f - 0.018f, 0.227f - 0.018f, 0.036f, 0.036f);
-        g.fillEllipse (0.731f - 0.012f, 0.2f - 0.012f, 0.024f, 0.024f);
+        for (auto [s, r] : { std::pair { k.head, 0.018f }, { k.tail, 0.018f }, { k.side, 0.012f } })
+            g.fillEllipse (s.x - r, s.y - r, 2.0f * r, 2.0f * r);
     }
 }
 
@@ -969,7 +1019,7 @@ void RoadView::drawOverlays (juce::Graphics& g) const
 
         const auto f = font (17.0f);
         const float th = 30.0f, tw = juce::GlyphArrangement::getStringWidth (f, text) + 40.0f;
-        const auto top = toScreen (c.px, c.py - 0.36f * carLen * c.sc);
+        const auto top = toScreen (c.px, c.py - bodyHeight (tagCar) * carLen * c.sc);
         const juce::Rectangle<float> box (juce::jlimit (70.0f, W - 70.0f, top.x) - tw * 0.5f, top.y - 6.0f - th, tw, th);
 
         juce::Graphics::ScopedSaveState s (g);

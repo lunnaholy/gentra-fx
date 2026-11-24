@@ -105,6 +105,7 @@ private:
     std::function<float()> bassLevel;
     BeatClock beatClock;
 
+    float bodyHeight (int car) const; // высота картинки кузова в длинах машины
     std::array<juce::Image, numCars> bodies;
     juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate, tag;
 
