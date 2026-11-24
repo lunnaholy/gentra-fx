@@ -1,0 +1,160 @@
+// Самопроверка настоящего процессора без хоста. Падает с ненулевым кодом, если что-то сломано.
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include <juce_audio_utils/juce_audio_utils.h>
+
+#include "../Source/PluginProcessor.h"
+
+#define CHECK(cond) \
+    do { if (! (cond)) { std::printf ("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); std::exit (1); } } while (false)
+
+namespace
+{
+void setParam (GentraAudioProcessor& p, const char* id, float percent)
+{
+    p.apvts.getParameter (id)->setValueNotifyingHost (percent / 100.0f);
+}
+
+void fillNoise (juce::AudioBuffer<float>& b, juce::Random& rng, float gain)
+{
+    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        for (int n = 0; n < b.getNumSamples(); ++n)
+            b.setSample (ch, n, gain * (rng.nextFloat() * 2.0f - 1.0f));
+}
+
+bool bitExact (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+{
+    for (int ch = 0; ch < a.getNumChannels(); ++ch)
+        if (std::memcmp (a.getReadPointer (ch), b.getReadPointer (ch), sizeof (float) * static_cast<size_t> (a.getNumSamples())) != 0)
+            return false;
+    return true;
+}
+
+bool allFinite (const juce::AudioBuffer<float>& b)
+{
+    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        for (int n = 0; n < b.getNumSamples(); ++n)
+            if (! std::isfinite (b.getSample (ch, n)))
+                return false;
+    return true;
+}
+
+void run (double sampleRate)
+{
+    GentraAudioProcessor p;
+    juce::MidiBuffer midi;
+    juce::Random rng (42);
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+
+    // 1. Обе ручки на 0 — побитово прозрачно при любых размерах блока.
+    p.prepareToPlay (sampleRate, 512);
+    for (int size : { 1, 7, 64, 512, 333 })
+    {
+        juce::AudioBuffer<float> buf (2, size), ref;
+        fillNoise (buf, rng, 1.5f);
+        ref.makeCopyOf (buf);
+        p.processBlock (buf, midi);
+        CHECK (bitExact (buf, ref));
+    }
+
+    // 2. Bass 100%: тихий синус 50 Hz заметно громче, full-scale — не выше 1.0.
+    setParam (p, "bass", 100.0f);
+    p.prepareToPlay (sampleRate, 512);
+    for (float amp : { 0.1f, 1.0f })
+    {
+        p.reset();
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate)); // 1 секунда
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+        {
+            const auto s = amp * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 50.0 * n / sampleRate));
+            buf.setSample (0, n, s);
+            buf.setSample (1, n, s);
+        }
+        p.processBlock (buf, midi);
+        const float peak = buf.getMagnitude (0, buf.getNumSamples());
+        CHECK (allFinite (buf));
+        CHECK (peak <= 1.0f);
+        if (amp < 0.5f)
+            CHECK (peak > amp * 2.5f); // шельф на 50 Hz даёт около +11 dB
+    }
+
+    // 3. Lo-Res 100%: сигнал «ступеньками», значения на сетке 4 бит.
+    setParam (p, "bass", 0.0f);
+    setParam (p, "lores", 100.0f);
+    p.prepareToPlay (sampleRate, 512);
+    {
+        juce::AudioBuffer<float> buf (2, 4096);
+        fillNoise (buf, rng, 0.9f);
+        p.processBlock (buf, midi);
+        int changes = 0;
+        for (int n = 1; n < buf.getNumSamples(); ++n)
+        {
+            changes += std::abs (buf.getSample (0, n) - buf.getSample (0, n - 1)) > 0.0f ? 1 : 0;
+            const float scaled = buf.getSample (0, n) * 8.0f;
+            CHECK (std::abs (scaled - std::round (scaled)) < 1.0e-6f);
+        }
+        const int expected = static_cast<int> (4096.0 * gentra::loresMinHz / sampleRate);
+        CHECK (changes > 0 && changes <= expected + 2);
+    }
+
+    // 4. Обе на 100%: тишина остаётся тишиной.
+    setParam (p, "bass", 100.0f);
+    p.prepareToPlay (sampleRate, 512);
+    {
+        juce::AudioBuffer<float> buf (2, 2048);
+        buf.clear();
+        p.processBlock (buf, midi);
+        CHECK (buf.getMagnitude (0, buf.getNumSamples()) <= 0.0f);
+    }
+
+    // 5. Случайная автоматизация и размеры блока: без NaN/Inf, пик ограничен.
+    for (int i = 0; i < 300; ++i)
+    {
+        setParam (p, "bass", rng.nextFloat() * 100.0f);
+        setParam (p, "lores", rng.nextFloat() * 100.0f);
+        juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
+        fillNoise (buf, rng, 1.0f);
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        CHECK (buf.getMagnitude (0, buf.getNumSamples()) < 8.0f);
+    }
+
+    // 6. Вернули ручки в 0 — после сглаживания снова побитово прозрачно.
+    setParam (p, "bass", 0.0f);
+    setParam (p, "lores", 0.0f);
+    {
+        juce::AudioBuffer<float> settle (2, static_cast<int> (sampleRate * 0.2));
+        fillNoise (settle, rng, 0.5f);
+        p.processBlock (settle, midi);
+
+        juce::AudioBuffer<float> buf (2, 512), ref;
+        fillNoise (buf, rng, 1.0f);
+        ref.makeCopyOf (buf);
+        p.processBlock (buf, midi);
+        CHECK (bitExact (buf, ref));
+    }
+
+    // 7. Состояние переживает сохранение/загрузку.
+    setParam (p, "bass", 37.0f);
+    setParam (p, "lores", 82.0f);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    GentraAudioProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (std::abs (q.apvts.getRawParameterValue ("bass")->load() - 37.0f) < 0.01f);
+    CHECK (std::abs (q.apvts.getRawParameterValue ("lores")->load() - 82.0f) < 0.01f);
+}
+}
+
+int main()
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        run (sampleRate);
+
+    std::printf ("OK\n");
+    return 0;
+}
