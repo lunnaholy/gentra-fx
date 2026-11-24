@@ -241,7 +241,8 @@ void traffic()
     }
 }
 
-// Гараж: скрытая машина закрывается, если была открыта, не мешает потоку, а маска живёт в пресете.
+// Гараж: скрытая машина закрывается, если была открыта, выключает свой эффект, не мешает потоку,
+// а маска живёт в пресете.
 void garage()
 {
     GentraAudioProcessor p;
@@ -251,6 +252,11 @@ void garage()
         road.setHidden (0, true);
         road.setHidden (5, true);
         CHECK (road.getSelected() == -1 && road.isHidden (0) && road.isHidden (5) && ! road.isHidden (1));
+        CHECK (p.apvts.getRawParameterValue ("bassOn")->load() < 0.5f); // скрытый эффект выключен
+        road.setHidden (1, true);
+        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() < 0.5f);
+        road.setHidden (1, false);
+        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() > 0.5f); // вернулся — включён
         road.setHidden (5, false);
         road.setHidden (7, true);
         for (int i = 0; i < 600; ++i)
@@ -263,6 +269,7 @@ void garage()
     q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     RoadView road (q.apvts, nullptr);
     CHECK (road.isHidden (0) && road.isHidden (7) && ! road.isHidden (5));
+    CHECK (q.apvts.getRawParameterValue ("bassOn")->load() < 0.5f);
 }
 
 // Масштаб окна: сохраняется в состоянии, новое окно открывается в том же размере, пропорции держатся.

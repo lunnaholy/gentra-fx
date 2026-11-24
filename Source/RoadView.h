@@ -32,7 +32,8 @@ public:
     // bassLevel — откуда брать уровень низа для тряски (вызывается раз в кадр на message thread).
     RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel);
 
-    // Скрытые машины не рисуются и не мешают потоку; маска хранится в состоянии плагина (пресеты).
+    // Скрытые машины не рисуются и не мешают потоку; скрытый рабочий эффект выключается.
+    // Маска хранится в состоянии плагина (пресеты).
     bool isHidden (int car) const;
     void setHidden (int car, bool hidden);
     void drawThumbnail (juce::Graphics&, int car, juce::Rectangle<float> area, float alpha) const;

@@ -218,6 +218,14 @@ void RoadView::setHidden (int car, bool hide)
     const int mask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
     hiddenMask = hide ? mask | (1 << car) : mask & ~(1 << car);
     apvts.state.setProperty (hiddenId, hiddenMask, nullptr);
+    // Скрытый рабочий эффект выключается, вернувшийся в гараже — включается.
+    if (car < numWorking)
+        if (auto* on = apvts.getParameter (working[static_cast<size_t> (car)].on))
+        {
+            on->beginChangeGesture();
+            on->setValueNotifyingHost (hide ? 0.0f : 1.0f);
+            on->endChangeGesture();
+        }
     if (hide && car == selected)
         select (-1);
     if (hide && car == hovered)
