@@ -32,6 +32,12 @@ constexpr float W = static_cast<float> (RoadView::width);
 constexpr float H = static_cast<float> (RoadView::height);
 constexpr float carLen = 150.0f, laneGap = 60.0f, roadTop = 200.0f;
 constexpr int lanes = 4, shoulder = 4;
+// Шашки: скорость потока (px/с на единицу ve), время перестроения, горизонт прогноза,
+// дальше какого места впереди не смотрим, цена одного перестроения (px места).
+constexpr float flowSpeed = 190.0f, laneChangeTime = 0.6f, foresight = 1.0f;
+constexpr float lookahead = carLen * 4.0f, laneCost = carLen * 0.25f;
+// Куда можно встроиться: минимум места до машины спереди и сзади (между центрами).
+constexpr float mergeFront = carLen * 1.5f, mergeBack = carLen * 1.3f;
 // Длина «кольца», по которому едет поток, = ширина экрана: уехавшая за край машина
 // тут же въезжает с другой стороны и целиком не пропадает никогда.
 constexpr float span = W;
@@ -149,7 +155,6 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
         c.lane = static_cast<int> (i) % lanes;
         c.lp = static_cast<float> (c.lane);
         c.x = (static_cast<float> (i) + 0.5f) * span / static_cast<float> (numCars);
-        c.rnd = 1.0f + rng.nextFloat() * 3.0f;
     }
 
     place();
@@ -195,6 +200,8 @@ void RoadView::select (int car)
 
 // ---------------- движение (как в прототипе) ----------------
 
+// Можно ли встать в полосу прямо сейчас: спереди и сзади есть место, с запасом на разницу скоростей
+// (быстрая машина сзади или медленная спереди съедят зазор за время перестроения).
 bool RoadView::laneFree (int car, int lane) const
 {
     const auto& c = cars[static_cast<size_t> (car)];
@@ -203,27 +210,70 @@ bool RoadView::laneFree (int car, int lane) const
         const auto& q = cars[o];
         if (static_cast<int> (o) == car || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
             continue;
+        const float closing = (q.ve - c.ve) * flowSpeed * laneChangeTime; // > 0 — сближаемся сзади
         const float d = ahead (c.x, q.x);
-        if (d < carLen * 1.5f || d > span - carLen * 1.3f)
+        if (d < mergeFront - juce::jmin (0.0f, closing) || d > span - mergeBack - juce::jmax (0.0f, closing))
             return false;
     }
     return true;
 }
 
-void RoadView::changeLane (int car)
+// Сколько места будет перед машиной в полосе через foresight секунд (пустая полоса — lookahead).
+float RoadView::room (int car, int lane) const
+{
+    const auto& c = cars[static_cast<size_t> (car)];
+    float best = lookahead;
+    for (size_t o = 0; o < cars.size(); ++o)
+    {
+        const auto& q = cars[o];
+        if (static_cast<int> (o) == car || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
+            continue;
+        if (const float d = ahead (c.x, q.x); d < span * 0.6f) // дальше — уже машина сзади
+            best = juce::jmin (best, d + (q.ve - c.ve) * flowSpeed * foresight);
+    }
+    return best;
+}
+
+// Шашки: поиск пути по полосам. Цель — полоса с наибольшим прогнозным местом впереди минус цена
+// за каждое перестроение; путь к ней идёт через соседние полосы, и каждая на пути должна быть
+// свободна сейчас. Машина делает первый шаг пути; следующий — после остывания, с новым планом.
+void RoadView::weave (int car)
 {
     auto& c = cars[static_cast<size_t> (car)];
-    int options[2];
-    int count = 0;
-    for (int lane : { c.lane - 1, c.lane + 1 })
-        if (lane >= 0 && lane < lanes && ! (selected >= 0 && lane == lanes - 1) && laneFree (car, lane))
-            options[count++] = lane;
+    const float here = room (car, c.lane);
+    if (here >= lookahead)
+        return; // впереди пусто — незачем
 
-    if (count > 0)
+    const int top = selected >= 0 ? lanes - 2 : lanes - 1; // ближняя полоса занята открытой машиной
+    // Упёрся в медленного — уходит в любую свободную полосу, где просторнее; иначе нужен запас,
+    // чтобы не дёргаться туда-сюда. Перестроение дальше соседней полосы стоит laneCost за каждую.
+    const bool stuck = here < mergeFront;
+    int step = 0;
+    float best = here + (stuck ? 0.0f : carLen * 0.3f + laneCost);
+    for (int dir : { -1, 1 })
+        for (int lane = c.lane + dir; lane >= 0 && lane <= top && laneFree (car, lane); lane += dir)
+            if (const float score = room (car, lane) - laneCost * static_cast<float> (std::abs (lane - c.lane) - 1); score > best)
+            {
+                best = score;
+                step = dir;
+            }
+
+    if (step != 0)
     {
-        c.lane = options[rng.nextInt (count)];
-        c.cool = 0.6f;
+        c.lane += step;
+        c.cool = laneChangeTime;
+        ++laneChanges;
     }
+}
+
+float RoadView::closestGap() const
+{
+    float gap = span;
+    for (size_t i = 0; i < cars.size(); ++i)
+        for (size_t o = 0; o < cars.size(); ++o)
+            if (i != o && std::abs (cars[i].lp - cars[o].lp) < 0.5f)
+                gap = juce::jmin (gap, ahead (cars[i].x, cars[o].x));
+    return gap;
 }
 
 void RoadView::timerCallback()
@@ -259,11 +309,15 @@ void RoadView::advance (float dt)
             }
         }
         const bool close = blocker >= 0 && dist < carLen * 1.5f;
-        const bool blocked = close && cars[static_cast<size_t> (blocker)].ve < target;
 
         if (i == selected)
         {
-            c.lane = lanes - 1; // открытая машина едет в ближней полосе
+            // Открытая машина пробирается в ближнюю полосу — по одной, только в свободное место.
+            if (const int step = juce::jlimit (-1, 1, lanes - 1 - c.lane); step != 0 && c.cool <= 0.0f && laneFree (i, c.lane + step))
+            {
+                c.lane += step;
+                c.cool = laneChangeTime;
+            }
         }
         else if (! on)
         {
@@ -281,21 +335,19 @@ void RoadView::advance (float dt)
         }
         else if (selected >= 0 && c.lane == lanes - 1)
         {
-            if (laneFree (i, lanes - 2))
-                c.lane = lanes - 2; // уступает ближнюю полосу открытой машине
+            if (laneFree (i, lanes - 2)) // уступает ближнюю полосу открытой машине,
+                c.lane = lanes - 2;
+            else if (laneFree (i, shoulder)) // а если некуда — уходит на обочину
+                c.lane = shoulder;
         }
-        else if (blocked && c.cool <= 0.0f)
+        else if (c.cool <= 0.0f)
         {
-            changeLane (i);
-        }
-        else if (! blocked && c.cool <= 0.0f && s > 0.4f && time > c.rnd)
-        {
-            changeLane (i); // сильный эффект — шашкует сам по себе
-            c.rnd = time + juce::jmap (s, 5.0f, 1.2f) * (0.6f + rng.nextFloat());
+            weave (i);
         }
 
-        if (close && c.lane == cars[static_cast<size_t> (blocker)].lane)
-            target = juce::jmin (target, cars[static_cast<size_t> (blocker)].ve);
+        // Догнал — едет со скоростью переднего; ближе дистанции — отстаёт, пока зазор не восстановится.
+        if (close)
+            target = juce::jmin (target, cars[static_cast<size_t> (blocker)].ve * juce::jmin (1.0f, dist / (carLen * 1.2f)));
         c.ve += (target - c.ve) * juce::jmin (1.0f, dt * 3.0f);
     }
 
@@ -306,7 +358,7 @@ void RoadView::advance (float dt)
     scroll += dt * (80.0f + 520.0f * cam);
     for (auto& c : cars)
     {
-        c.x = posMod (c.x + (c.ve - cam) * 190.0f * dt, span);
+        c.x = posMod (c.x + (c.ve - cam) * flowSpeed * dt, span);
         c.lp += (static_cast<float> (c.lane) - c.lp) * juce::jmin (1.0f, dt * 5.0f);
         c.spin += dt * (3.0f + c.ve * 16.0f);
     }

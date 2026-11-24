@@ -38,6 +38,10 @@ public:
 
     void advance (float dt); // один шаг анимации; публичный, чтобы тест мог прокрутить сцену
 
+    // Для теста шашек.
+    int getLaneChanges() const noexcept { return laneChanges; }
+    float closestGap() const; // минимальная дистанция между машинами в одной полосе
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -50,7 +54,7 @@ public:
 private:
     struct Car
     {
-        float x = 0.0f, lp = 0.0f, ve = 0.3f, cool = 0.0f, rnd = 0.0f, spin = 0.0f;
+        float x = 0.0f, lp = 0.0f, ve = 0.3f, cool = 0.0f, spin = 0.0f;
         float px = 0.0f, py = 0.0f, sc = 1.0f; // положение на экране без учёта камеры
         int lane = 0;
     };
@@ -61,7 +65,8 @@ private:
     bool isOn (int car) const;
     float strength (int car) const;
     bool laneFree (int car, int lane) const;
-    void changeLane (int car);
+    float room (int car, int lane) const;
+    void weave (int car);
     void place();
 
     juce::Point<float> toScreen (float worldX, float worldY) const;
@@ -89,6 +94,7 @@ private:
     float time = 0.0f, scroll = 0.0f, camX, camU = 0.0f;
     float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
     double lastTick = 0.0;
+    int laneChanges = 0;
     float rumble = 0.0f;            // огибающая низа
     juce::Point<float> shake;       // смещение земли и машин в этом кадре
 

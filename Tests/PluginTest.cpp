@@ -219,6 +219,28 @@ void run (double sampleRate)
     CHECK (std::abs (q.apvts.getRawParameterValue ("tint")->load()) < 0.01f);
 }
 
+// Шашки: за минуту поток перестраивается, машины в одной полосе не въезжают друг в друга
+// — и в свободном потоке, и когда открытая машина забрала ближнюю полосу.
+void traffic()
+{
+    GentraAudioProcessor p;
+    for (int car : { -1, 0 })
+    {
+        RoadView road (p.apvts, nullptr);
+        road.select (car);
+        float gap = 1.0e9f;
+        for (int i = 0; i < 60 * 60; ++i)
+        {
+            road.advance (1.0f / 60.0f);
+            if (i > 60) // первая секунда — разъезд со стартовых мест
+                gap = juce::jmin (gap, road.closestGap());
+        }
+        std::printf ("traffic car %d: %d lane changes, closest %.0f px\n", car, road.getLaneChanges(), gap);
+        CHECK (road.getLaneChanges() >= 10);
+        CHECK (gap > 100.0f);
+    }
+}
+
 // --snapshot out.png [percent] [frames] [car]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
 int snapshot (const char* path, float percent, int frames, int car)
 {
@@ -252,6 +274,7 @@ int main (int argc, char** argv)
 
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
+    traffic();
 
     std::printf ("OK\n");
     return 0;
