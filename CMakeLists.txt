@@ -43,15 +43,15 @@ juce_add_plugin(SauceGentraFX
 
 target_sources(SauceGentraFX PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/RoadView.cpp)
 
-# Графика интерфейса: замените файлы в Assets/ своими и пересоберите.
-juce_add_binary_data(GentraAssets SOURCES
-    Assets/body.png
-    Assets/wheel.png
-    Assets/traffic1.png
-    Assets/traffic2.png
-    Assets/traffic3.png)
+# Русские строки в исходниках — UTF-8; MSVC без этого флага читает их в кодировке системы.
+target_compile_options(SauceGentraFX PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
+# Графика интерфейса: замените PNG в Assets/ своими и пересоберите (список имён — в Source/RoadView.cpp).
+file(GLOB GENTRA_ASSETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.png)
+juce_add_binary_data(GentraAssets SOURCES ${GENTRA_ASSETS})
 
 target_compile_definitions(SauceGentraFX PUBLIC
     JUCE_WEB_BROWSER=0

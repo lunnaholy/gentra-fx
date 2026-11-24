@@ -1,0 +1,96 @@
+#pragma once
+
+#include <array>
+#include <functional>
+
+#include <juce_audio_processors/juce_audio_processors.h>
+
+// Дорога с машинами — порт HTML-прототипа. Машины 0 (чёрная) и 1 (ржавая) — рабочие эффекты:
+// клик по машине приближает камеру, и её колёса становятся ручками. Остальные едут декоративным потоком.
+class RoadView final : public juce::Component,
+                       private juce::Timer
+{
+public:
+    static constexpr int numCars = 12;
+    static constexpr int numWorking = 2;
+    static constexpr int width = 900, height = 560;
+
+    struct Working
+    {
+        const char* main;      // параметр заднего колеса
+        const char* mainLabel; // подпись под ним, заглавными: JUCE не меняет регистр кириллицы
+        const char* mix;       // параметр переднего колеса
+        const char* on;        // вкл/выкл
+    };
+    static const std::array<Working, numWorking> working;
+
+    static juce::String effectName (int car);
+    static juce::Colour bodyColour (int car);
+
+    explicit RoadView (juce::AudioProcessorValueTreeState&);
+
+    void select (int car); // -1 — ничего не выбрано
+    int getSelected() const noexcept { return selected; }
+    std::function<void (int)> onSelectionChanged;
+
+    void advance (float dt); // один шаг анимации; публичный, чтобы тест мог прокрутить сцену
+
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    struct Car
+    {
+        float x = 0.0f, lp = 0.0f, ve = 0.3f, cool = 0.0f, rnd = 0.0f, spin = 0.0f;
+        float px = 0.0f, py = 0.0f, sc = 1.0f; // положение на экране без учёта камеры
+        int lane = 0;
+    };
+
+    void timerCallback() override;
+
+    float param (const char* id) const;
+    bool isOn (int car) const;
+    float strength (int car) const;
+    bool laneFree (int car, int lane) const;
+    void changeLane (int car);
+    void place();
+
+    juce::Point<float> toScreen (float worldX, float worldY) const;
+    juce::Point<float> wheelCentre (int wheel) const;
+    float wheelHitRadius() const;
+    bool knobsVisible() const;
+    int carAt (juce::Point<float>) const;
+    int wheelAt (juce::Point<float>) const;
+    juce::RangedAudioParameter* knobParam (int wheel) const;
+
+    void drawScene (juce::Graphics&) const;
+    void drawCar (juce::Graphics&, int car) const;
+    void drawOverlays (juce::Graphics&) const;
+
+    juce::AudioProcessorValueTreeState& apvts;
+
+    std::array<juce::Image, numCars> bodies;
+    juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate;
+    juce::Image frame; // сцена в пониженном разрешении («крупный пиксель»)
+
+    std::array<Car, numCars> cars;
+    juce::Random rng;
+    int selected = -1, hovered = -1;
+    float time = 0.0f, scroll = 0.0f, camX, camU = 0.0f;
+    float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
+    double lastTick = 0.0;
+
+    struct Drag
+    {
+        int wheel = -1;
+        float angle = 0.0f, value = 0.0f;
+    } drag;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoadView)
+};

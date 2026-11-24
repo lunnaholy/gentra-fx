@@ -1,282 +1,207 @@
 #include "PluginEditor.h"
 
-#include "BinaryData.h"
-
 namespace
 {
-// ====================== ГРАФИКА: КАК ЗАМЕНИТЬ ======================
-// Картинки лежат в Assets/ и вшиваются в плагин при сборке. Чтобы поставить свои фото,
-// замените файлы с теми же именами (PNG с прозрачным фоном) и пересоберите:
-//   body.png      — кузов, вид сбоку, нос вправо. Колёса на фото можно оставить — их перекроет wheel.png.
-//   wheel.png     — колесо строго анфас, квадратная картинка, колесо вписано в края.
-//   traffic1..3   — машины потока, вид сбоку, нос вправо, низ картинки = низ колёс.
-// Затем подгоните четыре числа ниже под своё фото кузова:
-constexpr float rearWheelX   = 0.2098f; // центр заднего колеса: доля ширины body.png
-constexpr float frontWheelX  = 0.7857f; // центр переднего колеса: доля ширины body.png
-constexpr float wheelCentreY = 0.7789f; // центр колёс: доля высоты body.png
-constexpr float wheelRadius  = 0.0679f; // радиус колеса: доля ширины body.png
-// Проверить подгонку без DAW: build/GentraTest --snapshot кадр.png
-// ===================================================================
+const juce::Colour boxGrey { 0xffd9d9d9 };
+const juce::Colour hot { 0xffffff00 };
+const juce::Colour yes { 0xff35c435 };
+const juce::Colour no { 0xffe23b3b };
+constexpr float degrees = juce::MathConstants<float>::pi / 180.0f;
 
-constexpr int windowW = 760, windowH = 440;
-constexpr float carX = 100.0f, carWidth = 560.0f; // джентра на экране
-constexpr float trafficBaseWidth = 470.0f, farScale = 0.85f;
-constexpr float horizonY = 170.0f, roadTopY = 190.0f;
-constexpr float laneFarY = 262.0f, laneMidY = 318.0f, laneNearY = 372.0f; // где колёса касаются дороги
-constexpr float cruiseSpeed = 260.0f;   // px/с при ручках на нуле
-constexpr float speedBoost = 3.0f;      // на 100% едем в (1 + speedBoost) раз быстрее
-constexpr float overtakeSpeed = 520.0f; // px/с относительно потока при 100%
+juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 
-const juce::Colour accent { 0xffe8a33d };
-const juce::Colour text { 0xffeeeeee };
-
-juce::Image loadImage (const char* data, int size)
+// Доп. параметры машины во всплывающей коробке (главная ручка и Mix — на колёсах).
+struct Extra
 {
-    return juce::ImageFileFormat::loadFrom (data, static_cast<size_t> (size));
+    const char* id;
+    const char* label;
+    const char* unit;
+    int decimals;
+};
+const std::array<std::array<Extra, 2>, RoadView::numWorking> extras { {
+    { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 } } },
+    { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 } } },
+} };
+
+void rotate (juce::Component& c, float deg)
+{
+    c.setTransform (juce::AffineTransform::rotation (deg * degrees, c.getBounds().toFloat().getCentreX(), c.getBounds().toFloat().getCentreY()));
+}
 }
 
-float wrap (double value, float period)
+// ---------------- стиль ----------------
+
+BoxLook::BoxLook()
 {
-    return static_cast<float> (std::fmod (value, static_cast<double> (period)));
+    setColour (juce::TextButton::buttonColourId, juce::Colours::white);
+    setColour (juce::TextButton::buttonOnColourId, juce::Colours::white);
+    setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    setColour (juce::Label::textColourId, juce::Colours::black);
+    setColour (juce::Slider::backgroundColourId, juce::Colours::white);
+    setColour (juce::Slider::trackColourId, juce::Colours::black);
+    setColour (juce::Slider::thumbColourId, juce::Colours::black);
+    setColour (juce::Slider::textBoxTextColourId, juce::Colours::black);
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
 }
+
+void BoxLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& colour, bool, bool down)
+{
+    const auto r = b.getLocalBounds().toFloat();
+    g.setColour (down ? hot : colour);
+    g.fillRect (r);
+    g.setColour (b.isEnabled() ? juce::Colours::black : juce::Colours::grey);
+    g.drawRect (r, 2.0f);
+
+    if (b.getProperties()["current"])
+    {
+        g.setColour (hot);
+        g.drawRect (r.reduced (2.0f), 4.0f);
+    }
 }
+
+juce::Font BoxLook::getTextButtonFont (juce::TextButton&, int)
+{
+    return juce::FontOptions ("Arial", 14.0f, juce::Font::bold);
+}
+
+juce::Font BoxLook::getLabelFont (juce::Label&)
+{
+    return juce::FontOptions ("Arial", 13.0f, juce::Font::bold);
+}
+
+void Box::paint (juce::Graphics& g)
+{
+    g.fillAll (boxGrey);
+    g.setColour (juce::Colours::black);
+    g.drawRect (getLocalBounds(), 3);
+}
+
+// ---------------- редактор ----------------
 
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
-    : AudioProcessorEditor (&p),
-      body (loadImage (BinaryData::body_png, BinaryData::body_pngSize)),
-      wheel (loadImage (BinaryData::wheel_png, BinaryData::wheel_pngSize)),
-      traffic { { loadImage (BinaryData::traffic1_png, BinaryData::traffic1_pngSize),
-                  loadImage (BinaryData::traffic2_png, BinaryData::traffic2_pngSize),
-                  loadImage (BinaryData::traffic3_png, BinaryData::traffic3_pngSize) } },
-      bassAttachment (p.apvts, "bass", bassSlider),
-      loresAttachment (p.apvts, "lores", loresSlider),
-      // На старте в полосе джентры пусто: при ручках на нуле она просто едет в потоке.
-      cars { { { 430.0f, 0, 0 }, { -260.0f, 0, 1 }, { 820.0f, 1, 2 }, { 1500.0f, 0, 1 } } }
+    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts)
 {
-    jassert (body.isValid() && wheel.isValid());
+    setLookAndFeel (&look);
+    addAndMakeVisible (road);
+    road.onSelectionChanged = [this] (int car) { showPopup (car); };
 
-    bassSlider.setTitle ("Bass Boost");
-    loresSlider.setTitle ("Lo-Res");
-
-    for (auto* slider : { &bassSlider, &loresSlider })
+    // Очередь: номера рабочих машин. Клик открывает машину.
+    for (int i = 0; i < RoadView::numWorking; ++i)
     {
-        slider->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        slider->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-        for (int id : { juce::Slider::rotarySliderFillColourId, juce::Slider::rotarySliderOutlineColourId, juce::Slider::thumbColourId })
-            slider->setColour (id, juce::Colours::transparentBlack);
-        addAndMakeVisible (*slider);
+        auto& b = queueButtons[static_cast<size_t> (i)];
+        const auto colour = RoadView::bodyColour (i);
+        b.setButtonText (juce::String (i + 1));
+        b.setTooltip (RoadView::effectName (i));
+        b.setColour (juce::TextButton::buttonColourId, colour);
+        b.setColour (juce::TextButton::textColourOffId, colour.getPerceivedBrightness() > 0.5f ? juce::Colours::black : juce::Colours::white);
+        b.onClick = [this, i] { road.select (road.getSelected() == i ? -1 : i); };
+        queue.addAndMakeVisible (b);
     }
+    addAndMakeVisible (queue);
 
-    setOpaque (true);
-    setSize (windowW, windowH);
+    // Всплывающая коробка открытой машины.
+    onButton.setClickingTogglesState (true);
+    onButton.setColour (juce::TextButton::buttonColourId, no);
+    onButton.setColour (juce::TextButton::buttonOnColourId, yes);
+    onButton.onStateChange = [this] { updateOnButton(); };
+    closeButton.onClick = [this] { road.select (-1); };
+    popup.addAndMakeVisible (onButton);
+    popup.addAndMakeVisible (closeButton);
 
-    lastTime = juce::Time::getMillisecondCounterHiRes();
-    startTimerHz (60);
+    for (auto& row : rows)
+    {
+        row.slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        row.slider.setColour (juce::Slider::textBoxTextColourId, juce::Colours::black);
+        row.slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        row.slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        row.slider.setTextBoxStyle (juce::Slider::TextBoxRight, true, 62, 20);
+        popup.addAndMakeVisible (row.label);
+        popup.addAndMakeVisible (row.slider);
+    }
+    addChildComponent (popup);
+
+    setSize (RoadView::width, RoadView::height);
+    startTimerHz (10);
 }
 
-float GentraAudioProcessorEditor::wheelRadiusPx() const
+GentraAudioProcessorEditor::~GentraAudioProcessorEditor()
 {
-    return wheelRadius * carWidth;
-}
-
-juce::Rectangle<float> GentraAudioProcessorEditor::bodyBounds (float baselineY) const
-{
-    const float height = carWidth * static_cast<float> (body.getHeight()) / static_cast<float> (juce::jmax (1, body.getWidth()));
-    return { carX, baselineY - (wheelCentreY * height + wheelRadiusPx()), carWidth, height };
-}
-
-juce::Point<float> GentraAudioProcessorEditor::wheelCentre (juce::Rectangle<float> bounds, float xFraction) const
-{
-    return { bounds.getX() + xFraction * bounds.getWidth(), bounds.getY() + wheelCentreY * bounds.getHeight() };
-}
-
-float GentraAudioProcessorEditor::trafficWidth (const TrafficCar& car) const
-{
-    return trafficBaseWidth * (car.lane == 0 ? farScale : 1.0f);
+    setLookAndFeel (nullptr);
 }
 
 void GentraAudioProcessorEditor::resized()
 {
-    // Зона захвата накрывает колесо в обеих полосах, чтобы ручка не «убегала» из-под мыши.
-    const auto bounds = bodyBounds (laneMidY);
-    const float r = wheelRadiusPx();
+    road.setBounds (getLocalBounds());
 
-    const auto hitArea = [&] (float xFraction)
+    queue.setTransform ({});
+    queue.setBounds (206, 6, 10 + RoadView::numWorking * 44, 35);
+    for (int i = 0; i < RoadView::numWorking; ++i)
+        queueButtons[static_cast<size_t> (i)].setBounds (5 + i * 44, 5, 40, 25);
+    rotate (queue, 0.6f);
+
+    popup.setTransform ({});
+    popup.setBounds ((getWidth() - 300) / 2, getHeight() - 9 - 96, 300, 96);
+    onButton.setBounds (8, 8, 244, 28);
+    closeButton.setBounds (258, 8, 34, 28);
+    for (int i = 0; i < 2; ++i)
     {
-        const auto c = wheelCentre (bounds, xFraction);
-        return juce::Rectangle<float> (c.x - r, c.y - r, 2.0f * r, 2.0f * r + laneNearY - laneMidY).toNearestInt();
-    };
+        auto& row = rows[static_cast<size_t> (i)];
+        const int y = 42 + i * 25;
+        row.label.setBounds (6, y, 86, 22);
+        row.slider.setBounds (92, y, 202, 22);
+    }
+    rotate (popup, -0.6f);
+}
 
-    bassSlider.setBounds (hitArea (rearWheelX));
-    loresSlider.setBounds (hitArea (frontWheelX));
+void GentraAudioProcessorEditor::showPopup (int car)
+{
+    for (int i = 0; i < RoadView::numWorking; ++i)
+    {
+        auto& b = queueButtons[static_cast<size_t> (i)];
+        b.getProperties().set ("current", i == car);
+        b.repaint();
+    }
+
+    onAttachment.reset();
+    for (auto& row : rows)
+        row.attachment.reset();
+
+    popup.setVisible (car >= 0);
+    if (car < 0)
+        return;
+
+    auto& apvts = gentraProcessor.apvts;
+    onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, RoadView::working[static_cast<size_t> (car)].on, onButton);
+    updateOnButton();
+
+    for (size_t i = 0; i < rows.size(); ++i)
+    {
+        const auto& extra = extras[static_cast<size_t> (car)][i];
+        auto& row = rows[i];
+        row.label.setText (ru (extra.label), juce::dontSendNotification);
+        row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, extra.id, row.slider);
+        // Attachment ставит свой форматтер — подменяем на русские единицы.
+        row.slider.textFromValueFunction = [extra] (double v) { return juce::String (v, extra.decimals) + " " + ru (extra.unit); };
+        row.slider.setTitle (ru (extra.label));
+        row.slider.updateText();
+    }
+}
+
+void GentraAudioProcessorEditor::updateOnButton()
+{
+    onButton.setButtonText (onButton.getToggleState() ? ru ("Включен") : ru ("Выключен"));
+    onButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
 }
 
 void GentraAudioProcessorEditor::timerCallback()
 {
-    const double now = juce::Time::getMillisecondCounterHiRes();
-    advance (juce::jlimit (0.0f, 0.05f, static_cast<float> ((now - lastTime) * 0.001)));
-    lastTime = now;
-}
-
-void GentraAudioProcessorEditor::advance (float dt)
-{
-    const auto amount = static_cast<float> ((bassSlider.getValue() + loresSlider.getValue()) / 200.0);
-    const float roadSpeed = cruiseSpeed * (1.0f + speedBoost * amount);
-    const float overtake = overtakeSpeed * amount;
-
-    distance += static_cast<double> (roadSpeed * dt);
-    wheelAngle = std::fmod (wheelAngle + roadSpeed * dt / wheelRadiusPx(), juce::MathConstants<float>::twoPi);
-
-    // Поток: машины уезжают назад, за левым краем перерождаются справа.
-    bool blocked = false;
-    const float lookAhead = 60.0f + overtake * 0.35f; // чем быстрее, тем раньше перестраиваемся
-
-    for (auto& car : cars)
+    // Выключенная машина в очереди бледнеет (параметр может прийти из автоматизации).
+    for (int i = 0; i < RoadView::numWorking; ++i)
     {
-        car.x -= overtake * dt;
-
-        if (car.x + trafficWidth (car) < -20.0f)
-        {
-            car.lane = rng.nextInt (2);
-            car.skin = rng.nextInt (static_cast<int> (traffic.size()));
-
-            float spawnX = static_cast<float> (windowW) + 40.0f;
-            for (const auto& other : cars)
-                if (&other != &car && other.lane == car.lane)
-                    spawnX = juce::jmax (spawnX, other.x + trafficWidth (other) + 120.0f);
-
-            car.x = spawnX + rng.nextFloat() * 320.0f;
-        }
-
-        if (car.lane == 1 && car.x < carX + carWidth + lookAhead && car.x + trafficWidth (car) > carX - 40.0f)
-            blocked = true;
+        const bool on = gentraProcessor.apvts.getRawParameterValue (RoadView::working[static_cast<size_t> (i)].on)->load() > 0.5f;
+        queueButtons[static_cast<size_t> (i)].setAlpha (on ? 1.0f : 0.55f);
     }
-
-    laneBlend += ((blocked ? 1.0f : 0.0f) - laneBlend) * (1.0f - std::exp (-dt * 9.0f));
-    repaint();
-}
-
-void GentraAudioProcessorEditor::drawScenery (juce::Graphics& g) const
-{
-    const auto width = static_cast<float> (getWidth());
-    const auto height = static_cast<float> (getHeight());
-
-    // Небо
-    g.setGradientFill ({ juce::Colour (0xff1b2444), 0.0f, 0.0f, juce::Colour (0xffd0773f), 0.0f, horizonY, false });
-    g.fillRect (0.0f, 0.0f, width, horizonY);
-
-    // Город на горизонте (едет медленно — параллакс)
-    constexpr float buildingW = 64.0f;
-    const double cityOffset = distance * 0.06;
-    const auto firstBuilding = static_cast<juce::int64> (cityOffset / static_cast<double> (buildingW));
-    g.setColour (juce::Colour (0xff161a2e));
-
-    for (juce::int64 i = firstBuilding; i < firstBuilding + 14; ++i)
-    {
-        const auto hash = static_cast<juce::uint32> (i) * 2654435761u;
-        const auto h = 24.0f + static_cast<float> ((hash >> 20) % 80u);
-        const auto x = static_cast<float> (static_cast<double> (i) * static_cast<double> (buildingW) - cityOffset);
-        g.fillRect (x, horizonY - h, buildingW - 6.0f, h);
-    }
-
-    // Обочина и отбойник
-    g.setColour (juce::Colour (0xff24252c));
-    g.fillRect (0.0f, horizonY, width, roadTopY - horizonY);
-    g.setColour (juce::Colour (0xff8b8f99));
-    g.fillRect (0.0f, horizonY + 6.0f, width, 3.0f);
-    for (float x = -wrap (distance * 0.9, 48.0f); x < width; x += 48.0f)
-        g.fillRect (x, horizonY + 6.0f, 3.0f, 12.0f);
-
-    // Асфальт и разметка
-    g.setColour (juce::Colour (0xff3a3b43));
-    g.fillRect (0.0f, roadTopY, width, height - roadTopY);
-    g.setColour (juce::Colour (0xffd8d8d8));
-    g.fillRect (0.0f, roadTopY + 8.0f, width, 3.0f);
-
-    for (float y : { (laneFarY + laneMidY) * 0.5f - 12.0f, (laneMidY + laneNearY) * 0.5f - 10.0f })
-        for (float x = -wrap (distance, 110.0f); x < width; x += 110.0f)
-            g.fillRect (x, y, 54.0f, 4.0f);
-}
-
-void GentraAudioProcessorEditor::drawTraffic (juce::Graphics& g, int lane) const
-{
-    for (const auto& car : cars)
-    {
-        if (car.lane != lane)
-            continue;
-
-        const auto& image = traffic[static_cast<size_t> (car.skin)];
-        const float w = trafficWidth (car);
-        const float h = w * static_cast<float> (image.getHeight()) / static_cast<float> (juce::jmax (1, image.getWidth()));
-        const float baseline = lane == 0 ? laneFarY : laneMidY;
-
-        g.setColour (juce::Colours::black.withAlpha (0.3f));
-        g.fillEllipse (car.x + w * 0.03f, baseline - 7.0f, w * 0.94f, 14.0f);
-        g.setOpacity (1.0f); // картинки рисуются с альфой текущего цвета
-        g.drawImage (image, { car.x, baseline - h, w, h });
-    }
-}
-
-void GentraAudioProcessorEditor::drawKnob (juce::Graphics& g, juce::Point<float> centre, const juce::Slider& slider, const juce::String& title) const
-{
-    const float r = wheelRadiusPx();
-
-    // Колесо катится со скоростью дороги
-    const auto w = static_cast<float> (juce::jmax (1, wheel.getWidth()));
-    const auto h = static_cast<float> (juce::jmax (1, wheel.getHeight()));
-    g.setOpacity (1.0f);
-    g.drawImageTransformed (wheel, juce::AffineTransform::scale (2.0f * r / w, 2.0f * r / h)
-                                       .translated (centre.x - r, centre.y - r)
-                                       .rotated (wheelAngle, centre.x, centre.y));
-
-    // Значение — дугой вокруг колеса
-    const auto value = static_cast<float> (slider.getValue() / slider.getMaximum());
-    const float start = -0.75f * juce::MathConstants<float>::pi;
-    const float sweep = 1.5f * juce::MathConstants<float>::pi;
-    const juce::PathStrokeType stroke (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
-
-    juce::Path trackArc, valueArc;
-    trackArc.addCentredArc (centre.x, centre.y, r + 7.0f, r + 7.0f, 0.0f, start, start + sweep, true);
-    g.setColour (juce::Colours::white.withAlpha (0.22f));
-    g.strokePath (trackArc, stroke);
-
-    if (value > 0.0f)
-    {
-        valueArc.addCentredArc (centre.x, centre.y, r + 7.0f, r + 7.0f, 0.0f, start, start + sweep * value, true);
-        g.setColour (accent);
-        g.strokePath (valueArc, stroke);
-    }
-
-    // Подписи стоят на месте, под колесом
-    const juce::Rectangle<float> labelArea (centre.x - 90.0f, static_cast<float> (getHeight()) - 48.0f, 180.0f, 20.0f);
-    g.setColour (text);
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-    g.drawText (title, labelArea, juce::Justification::centred);
-    g.setColour (accent);
-    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    g.drawText (juce::String (juce::roundToInt (slider.getValue())) + " %", labelArea.translated (0.0f, 20.0f), juce::Justification::centred);
-}
-
-void GentraAudioProcessorEditor::paint (juce::Graphics& g)
-{
-    drawScenery (g);
-
-    g.setColour (text.withAlpha (0.85f));
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText ("SAUCE GENTRA FX", getLocalBounds().removeFromTop (30).reduced (12, 0), juce::Justification::centredLeft);
-
-    drawTraffic (g, 0);
-    drawTraffic (g, 1);
-
-    // Джентра: всегда ближе к камере, чем поток, поэтому её ничто не перекрывает.
-    const float baseline = laneMidY + (laneNearY - laneMidY) * laneBlend;
-    const auto bounds = bodyBounds (baseline);
-
-    g.setColour (juce::Colours::black.withAlpha (0.4f));
-    g.fillEllipse (bounds.getX() + 12.0f, baseline - 8.0f, bounds.getWidth() - 24.0f, 16.0f);
-    g.setOpacity (1.0f);
-    g.drawImage (body, bounds);
-
-    drawKnob (g, wheelCentre (bounds, rearWheelX), bassSlider, "BASS BOOST");
-    drawKnob (g, wheelCentre (bounds, frontWheelX), loresSlider, "LO-RES");
 }

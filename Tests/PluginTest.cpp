@@ -12,9 +12,11 @@
 
 namespace
 {
-void setParam (GentraAudioProcessor& p, const char* id, float percent)
+// value — в единицах параметра (%, Гц, бит, кГц; для вкл/выкл — 0 или 1).
+void setParam (GentraAudioProcessor& p, const char* id, float value)
 {
-    p.apvts.getParameter (id)->setValueNotifyingHost (percent / 100.0f);
+    auto* param = p.apvts.getParameter (id);
+    param->setValueNotifyingHost (param->convertTo0to1 (value));
 }
 
 void fillNoise (juce::AudioBuffer<float>& b, juce::Random& rng, float gain)
@@ -30,6 +32,33 @@ bool bitExact (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>
         if (std::memcmp (a.getReadPointer (ch), b.getReadPointer (ch), sizeof (float) * static_cast<size_t> (a.getNumSamples())) != 0)
             return false;
     return true;
+}
+
+double rms (const juce::AudioBuffer<float>& b)
+{
+    double sum = 0.0;
+    for (int n = 0; n < b.getNumSamples(); ++n)
+        sum += static_cast<double> (b.getSample (0, n)) * static_cast<double> (b.getSample (0, n));
+    return std::sqrt (sum / b.getNumSamples());
+}
+
+// Прогоняет 0.2 с шума, чтобы сглаживание доехало.
+void settle (GentraAudioProcessor& p, double sampleRate, juce::Random& rng)
+{
+    juce::MidiBuffer midi;
+    juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 0.2));
+    fillNoise (buf, rng, 0.5f);
+    p.processBlock (buf, midi);
+}
+
+bool transparent (GentraAudioProcessor& p, juce::Random& rng)
+{
+    juce::MidiBuffer midi;
+    juce::AudioBuffer<float> buf (2, 512), ref;
+    fillNoise (buf, rng, 1.0f);
+    ref.makeCopyOf (buf);
+    p.processBlock (buf, midi);
+    return bitExact (buf, ref);
 }
 
 bool allFinite (const juce::AudioBuffer<float>& b)
@@ -95,7 +124,7 @@ void run (double sampleRate)
             const float scaled = buf.getSample (0, n) * 8.0f;
             CHECK (std::abs (scaled - std::round (scaled)) < 1.0e-6f);
         }
-        const int expected = static_cast<int> (4096.0 * gentra::loresMinHz / sampleRate);
+        const int expected = static_cast<int> (4096.0 * 1500.0 / sampleRate);
         CHECK (changes > 0 && changes <= expected + 2);
     }
 
@@ -136,7 +165,34 @@ void run (double sampleRate)
         CHECK (bitExact (buf, ref));
     }
 
-    // 7. Состояние переживает сохранение/загрузку.
+    // 7. Ручка выкручена, но Mix = 0 или машина выключена — побитово прозрачно.
+    setParam (p, "bass", 100.0f);
+    setParam (p, "lores", 100.0f);
+    setParam (p, "bassMix", 0.0f);
+    setParam (p, "loresOn", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, "bassMix", 100.0f);
+    setParam (p, "loresOn", 1.0f);
+    setParam (p, "bass", 0.0f);
+    setParam (p, "lores", 0.0f);
+
+    // 8. Тонировка глушит верх даже при нулевом басе, а вернувшись в 0 — снова прозрачно.
+    {
+        juce::AudioBuffer<float> hiss (2, 8192);
+        for (int n = 0; n < hiss.getNumSamples(); ++n) // чередование ±0.5 — чистая частота Найквиста
+            for (int ch = 0; ch < 2; ++ch)
+                hiss.setSample (ch, n, (n % 2 == 0) ? 0.5f : -0.5f);
+        setParam (p, "tint", 100.0f);
+        settle (p, sampleRate, rng);
+        p.processBlock (hiss, midi);
+        CHECK (rms (hiss) < 0.05);
+        setParam (p, "tint", 0.0f);
+        settle (p, sampleRate, rng);
+        CHECK (transparent (p, rng));
+    }
+
+    // 9. Состояние переживает сохранение/загрузку.
     setParam (p, "bass", 37.0f);
     setParam (p, "lores", 82.0f);
     juce::MemoryBlock state;
@@ -145,10 +201,11 @@ void run (double sampleRate)
     q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     CHECK (std::abs (q.apvts.getRawParameterValue ("bass")->load() - 37.0f) < 0.01f);
     CHECK (std::abs (q.apvts.getRawParameterValue ("lores")->load() - 82.0f) < 0.01f);
+    CHECK (std::abs (q.apvts.getRawParameterValue ("tint")->load()) < 0.01f);
 }
 
-// --snapshot out.png [percent] [frames]: рендерит интерфейс в PNG без окна.
-int snapshot (const char* path, float percent, int frames)
+// --snapshot out.png [percent] [frames] [car]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
+int snapshot (const char* path, float percent, int frames, int car)
 {
     GentraAudioProcessor p;
     setParam (p, "bass", percent);
@@ -157,6 +214,7 @@ int snapshot (const char* path, float percent, int frames)
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
     CHECK (gentra != nullptr);
+    gentra->select (car);
     for (int i = 0; i < frames; ++i)
         gentra->advance (1.0f / 60.0f);
 
@@ -174,7 +232,8 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI juceInit;
 
     if (argc >= 3 && std::strcmp (argv[1], "--snapshot") == 0)
-        return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0);
+        return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0,
+                         argc > 5 ? std::atoi (argv[5]) : -1);
 
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
