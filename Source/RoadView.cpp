@@ -73,6 +73,8 @@ enum { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yel
 
 juce::Image asset (const char* name) { return RoadView::image (name); }
 
+const juce::Identifier hiddenId { "hiddenCars" }; // битовая маска скрытых машин в состоянии плагина
+
 float posMod (float a, float n)
 {
     const float m = std::fmod (a, n);
@@ -155,6 +157,7 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
         c.x = (static_cast<float> (i) + 0.5f) * span / static_cast<float> (numCars);
     }
 
+    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
     place();
     setOpaque (true);
     setSize (width, height);
@@ -186,6 +189,42 @@ float RoadView::strength (int car) const
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
+// Машина целиком (кузов и колёса) в рамке area: нос вправо, колёса на нижней кромке.
+void RoadView::drawThumbnail (juce::Graphics& g, int car, juce::Rectangle<float> area, float alpha) const
+{
+    const auto& body = bodies[static_cast<size_t> (car)];
+    const float aspect = static_cast<float> (body.getHeight()) / static_cast<float> (juce::jmax (1, body.getWidth()));
+    const float len = juce::jmin (area.getWidth(), area.getHeight() / aspect);
+    const auto toArea = juce::AffineTransform::scale (len, -len).translated (area.getCentreX() - len * 0.5f, area.getBottom());
+
+    juce::Graphics::ScopedSaveState s (g);
+    drawInCarUnits (g, body, alpha, toArea);
+    const float ww = static_cast<float> (juce::jmax (1, wheel.getWidth())), wh = static_cast<float> (juce::jmax (1, wheel.getHeight()));
+    g.setOpacity (alpha);
+    for (float wx : { rearWheelX, frontWheelX })
+        g.drawImageTransformed (wheel, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
+                                           .scaled (2.0f * wheelR / ww, -2.0f * wheelR / wh)
+                                           .translated (wx, wheelY)
+                                           .followedBy (toArea));
+}
+
+bool RoadView::isHidden (int car) const
+{
+    return (static_cast<int> (apvts.state.getProperty (hiddenId, 0)) >> car) & 1;
+}
+
+void RoadView::setHidden (int car, bool hide)
+{
+    const int mask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
+    hiddenMask = hide ? mask | (1 << car) : mask & ~(1 << car);
+    apvts.state.setProperty (hiddenId, hiddenMask, nullptr);
+    if (hide && car == selected)
+        select (-1);
+    if (hide && car == hovered)
+        hovered = -1;
+    repaint();
+}
+
 void RoadView::select (int car)
 {
     if (car == selected)
@@ -206,7 +245,7 @@ bool RoadView::laneFree (int car, int lane) const
     for (size_t o = 0; o < cars.size(); ++o)
     {
         const auto& q = cars[o];
-        if (static_cast<int> (o) == car || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
+        if (static_cast<int> (o) == car || hidden (static_cast<int> (o)) || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
             continue;
         const float closing = (q.ve - c.ve) * flowSpeed * laneChangeTime; // > 0 — сближаемся сзади
         const float d = ahead (c.x, q.x);
@@ -224,7 +263,7 @@ float RoadView::room (int car, int lane) const
     for (size_t o = 0; o < cars.size(); ++o)
     {
         const auto& q = cars[o];
-        if (static_cast<int> (o) == car || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
+        if (static_cast<int> (o) == car || hidden (static_cast<int> (o)) || (q.lane != lane && std::abs (q.lp - static_cast<float> (lane)) > 0.5f))
             continue;
         if (const float d = ahead (c.x, q.x); d < span * 0.6f) // дальше — уже машина сзади
             best = juce::jmin (best, d + (q.ve - c.ve) * flowSpeed * foresight);
@@ -269,7 +308,7 @@ float RoadView::closestGap() const
     float gap = span;
     for (size_t i = 0; i < cars.size(); ++i)
         for (size_t o = 0; o < cars.size(); ++o)
-            if (i != o && std::abs (cars[i].lp - cars[o].lp) < 0.5f)
+            if (i != o && ! hidden (static_cast<int> (i)) && ! hidden (static_cast<int> (o)) && std::abs (cars[i].lp - cars[o].lp) < 0.5f)
                 gap = juce::jmin (gap, ahead (cars[i].x, cars[o].x));
     return gap;
 }
@@ -285,8 +324,15 @@ void RoadView::advance (float dt)
 {
     time += dt;
 
+    // Маска могла смениться из пресета.
+    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
+    if (selected >= 0 && hidden (selected))
+        select (-1);
+
     for (int i = 0; i < numCars; ++i)
     {
+        if (hidden (i))
+            continue; // скрытая едет «призраком»: ни на кого не реагирует, никому не мешает
         auto& c = cars[static_cast<size_t> (i)];
         const bool on = isOn (i);
         const float s = strength (i);
@@ -297,7 +343,7 @@ void RoadView::advance (float dt)
         float dist = 1.0e9f;
         for (int o = 0; o < numCars; ++o)
         {
-            if (o == i || cars[static_cast<size_t> (o)].lane != c.lane)
+            if (o == i || hidden (o) || cars[static_cast<size_t> (o)].lane != c.lane)
                 continue;
             const float d = ahead (c.x, cars[static_cast<size_t> (o)].x);
             if (d < dist)
@@ -429,6 +475,8 @@ int RoadView::carAt (juce::Point<float> p) const
     int best = -1;
     for (int i = 0; i < numCars; ++i) // ближние полосы перекрывают дальние
     {
+        if (hidden (i))
+            continue;
         const auto& c = cars[static_cast<size_t> (i)];
         const float half = carLen * c.sc * 0.6f;
         if (std::abs (wrap (x - c.px)) < half && y < c.py + 10.0f && y > c.py - 0.42f * carLen * c.sc
@@ -582,9 +630,10 @@ void RoadView::drawScene (juce::Graphics& g) const
     // Машина у края рисуется и копией с другой стороны кольца.
     const float reach = carLen * 1.7f; // с учётом шлейфов эффектов за машиной
     for (int i : order)
-        for (float k : { -1.0f, 0.0f, 1.0f })
-            if (const float px = cars[static_cast<size_t> (i)].px + k * span; px + reach > x0 && px - reach < x1)
-                drawCar (g, i, px);
+        if (! hidden (i))
+            for (float k : { -1.0f, 0.0f, 1.0f })
+                if (const float px = cars[static_cast<size_t> (i)].px + k * span; px + reach > x0 && px - reach < x1)
+                    drawCar (g, i, px);
 }
 
 void RoadView::drawCar (juce::Graphics& g, int i, float px) const

@@ -241,6 +241,30 @@ void traffic()
     }
 }
 
+// Гараж: скрытая машина закрывается, если была открыта, не мешает потоку, а маска живёт в пресете.
+void garage()
+{
+    GentraAudioProcessor p;
+    {
+        RoadView road (p.apvts, nullptr);
+        road.select (0);
+        road.setHidden (0, true);
+        road.setHidden (5, true);
+        CHECK (road.getSelected() == -1 && road.isHidden (0) && road.isHidden (5) && ! road.isHidden (1));
+        road.setHidden (5, false);
+        road.setHidden (7, true);
+        for (int i = 0; i < 600; ++i)
+            road.advance (1.0f / 60.0f);
+        CHECK (road.closestGap() > 100.0f);
+    }
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    GentraAudioProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    RoadView road (q.apvts, nullptr);
+    CHECK (road.isHidden (0) && road.isHidden (7) && ! road.isHidden (5));
+}
+
 // Масштаб окна: сохраняется в состоянии, новое окно открывается в том же размере, пропорции держатся.
 void uiScale()
 {
@@ -266,7 +290,13 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
     CHECK (gentra != nullptr);
-    gentra->select (car);
+    if (car == -2) // гараж с парой скрытых машин
+    {
+        p.apvts.state.setProperty ("hiddenCars", (1 << 3) | (1 << 7), nullptr);
+        gentra->openGarage();
+    }
+    else
+        gentra->select (car);
     for (int i = 0; i < frames; ++i)
         gentra->advance (1.0f / 60.0f);
 
@@ -291,6 +321,7 @@ int main (int argc, char** argv)
         run (sampleRate);
     traffic();
     uiScale();
+    garage();
 
     std::printf ("OK\n");
     return 0;

@@ -32,6 +32,11 @@ public:
     // bassLevel — откуда брать уровень низа для тряски (вызывается раз в кадр на message thread).
     RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel);
 
+    // Скрытые машины не рисуются и не мешают потоку; маска хранится в состоянии плагина (пресеты).
+    bool isHidden (int car) const;
+    void setHidden (int car, bool hidden);
+    void drawThumbnail (juce::Graphics&, int car, juce::Rectangle<float> area, float alpha) const;
+
     void select (int car); // -1 — ничего не выбрано
     int getSelected() const noexcept { return selected; }
     std::function<void (int)> onSelectionChanged;
@@ -94,6 +99,8 @@ private:
     float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
     double lastTick = 0.0;
     int laneChanges = 0;
+    int hiddenMask = 0; // копия маски из состояния на этот кадр
+    bool hidden (int car) const noexcept { return (hiddenMask >> car) & 1; }
     float rumble = 0.0f;            // огибающая низа
     juce::Point<float> shake;       // смещение земли и машин в этом кадре
 
