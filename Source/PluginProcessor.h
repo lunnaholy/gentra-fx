@@ -43,6 +43,15 @@ public:
     // Между блоками досчитывается по темпу. false — транспорт стоит или хост не сообщает позицию.
     bool beatNow (double& beatInBar, double& bpm) const noexcept;
 
+    // Порядок всех машин в гараже (номера gentra::car). Рабочие эффекты звучат в этом порядке, остальные пропускаются.
+    // Хранится в состоянии плагина (пресеты); звук переключается на новый порядок через короткий провал громкости.
+    using CarOrder = std::array<int, gentra::car::count>;
+    static constexpr CarOrder defaultOrder { gentra::car::black, gentra::car::rustCar, gentra::car::red, gentra::car::white,
+                                             gentra::car::silver, gentra::car::green, gentra::car::orange, gentra::car::purple,
+                                             gentra::car::blue, gentra::car::pink, gentra::car::grey, gentra::car::yellow };
+    CarOrder getCarOrder() const;
+    void setCarOrder (const CarOrder&);
+
 private:
     // Сглаженные параметры одной машины: главная ручка, до трёх доп. параметров, итоговый wet (Mix с учётом вкл/выкл).
     struct Stage
@@ -69,8 +78,21 @@ private:
     Stage makeStage (const char* mainId, float mainScale, const char* aId, float aScale, const char* bId, float bScale,
                      const char* mixId, const char* onId, int aliveMask, const char* cId = nullptr, float cScale = 0.0f);
 
+    // Каждая стадия обрабатывает весь блок на месте; простаивающая не трогает буфер.
+    void processCar (int car, juce::AudioBuffer<float>&, int numChannels) noexcept;
+    void processBass (juce::AudioBuffer<float>&, int numChannels) noexcept;
+    void processLores (juce::AudioBuffer<float>&, int numChannels) noexcept;
     void processDrive (juce::AudioBuffer<float>&, int numChannels) noexcept;
-    void processEqAndDelay (juce::AudioBuffer<float>&, int numChannels) noexcept;
+    void processEq (juce::AudioBuffer<float>&, int numChannels) noexcept;
+    void processDelay (juce::AudioBuffer<float>&, int numChannels) noexcept;
+
+    // Звучащие машины по порядку: номер + 1 в каждых 4 битах, младшие — первая; 0 — конец.
+    std::atomic<std::uint64_t> chain { 0 };
+    std::uint64_t playingChain = 0; // что звучит сейчас (аудиопоток)
+    void storeChain (const CarOrder&) noexcept;
+    // Смена порядка: громкость плавно в ноль, новый порядок, плавно обратно.
+    // ponytail: провал ~20 мс вместо настоящего кроссфейда (тот требует второй копии всех стадий).
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> chainGain;
 
     Stage black, rust, red, white, silver;
     std::atomic<float>* delaySync;

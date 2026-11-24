@@ -73,6 +73,9 @@ GentraAudioProcessor::GentraAudioProcessor()
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
+    storeChain (getCarOrder());
+    playingChain = chain.load();
+    chainGain.setCurrentAndTargetValue (1.0f);
 }
 
 GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId, float mainScale, const char* aId, float aScale,
@@ -175,6 +178,9 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     silver.prepare (sampleRate);
     eq.prepare (sampleRate);
     delay.prepare (sampleRate);
+    chainGain.reset (sampleRate, 0.01);
+    playingChain = chain.load();
+    chainGain.setCurrentAndTargetValue (1.0f);
 }
 
 void GentraAudioProcessor::reset()
@@ -192,6 +198,8 @@ void GentraAudioProcessor::reset()
     red.snap();
     white.snap();
     silver.snap();
+    playingChain = chain.load();
+    chainGain.setCurrentAndTargetValue (1.0f);
 }
 
 bool GentraAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -210,66 +218,25 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         buffer.clear (ch, 0, numSamples);
 
     readTransport();
-    black.updateTargets();
-    rust.updateTargets();
-
-    const bool bassOn = black.active();
-    const bool loresOn = rust.active();
-
-    if (! bassOn)
-    {
-        bass.reset();
-        black.skip (numSamples);
-    }
-    if (! loresOn)
-    {
-        lores.reset();
-        rust.skip (numSamples);
-    }
     const int numChannels = juce::jmin (buffer.getNumChannels(), gentra::maxChannels);
     auto* const* data = buffer.getArrayOfWritePointers();
 
-    for (int n = 0; (bassOn || loresOn) && n < numSamples; ++n)
-    {
-        if (bassOn)
+    // Новый порядок — только когда громкость уже ушла в ноль.
+    const auto wanted = chain.load (std::memory_order_relaxed);
+    if (wanted != playingChain && chainGain.getCurrentValue() <= 0.0f)
+        playingChain = wanted;
+    chainGain.setTargetValue (wanted == playingChain ? 1.0f : 0.0f);
+
+    for (auto order = playingChain; order != 0; order >>= 4)
+        processCar (static_cast<int> (order & 15) - 1, buffer, numChannels);
+
+    if (chainGain.isSmoothing() || chainGain.getCurrentValue() < 1.0f)
+        for (int n = 0; n < numSamples; ++n)
         {
-            const float amount = black.next (Stage::main);
-            const float freq = black.next (Stage::extraA);
-            const float tint = black.next (Stage::extraB);
-            const float wet = black.next (Stage::wet);
-            bass.setParams (amount, freq, tint);
-
+            const float gain = chainGain.getNextValue();
             for (int ch = 0; ch < numChannels; ++ch)
-            {
-                const float x = data[ch][n];
-                data[ch][n] = wet * bass.processSample (ch, x) + (1.0f - wet) * x; // при Mix 100% — ровно эффект
-            }
+                data[ch][n] *= gain;
         }
-
-        if (loresOn)
-        {
-            const float amount = rust.next (Stage::main);
-            const float bits = rust.next (Stage::extraA);
-            const float rate = rust.next (Stage::extraB);
-            const float wet = rust.next (Stage::wet);
-            lores.setParams (amount, bits, rate);
-            const bool capture = lores.tick();
-
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                const float x = data[ch][n];
-                data[ch][n] = wet * lores.processSample (ch, x, capture) + (1.0f - wet) * x;
-            }
-        }
-    }
-
-    red.updateTargets();
-    if (numChannels > 0)
-        processDrive (buffer, numChannels);
-    else
-        red.skip (numSamples);
-
-    processEqAndDelay (buffer, numChannels);
 
     // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
     if (numChannels > 0)
@@ -283,6 +250,78 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
         if (peak > bassLevel.load (std::memory_order_relaxed))
             bassLevel.store (peak, std::memory_order_relaxed);
+    }
+}
+
+void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    switch (car)
+    {
+        case gentra::car::black: processBass (buffer, numChannels); break;
+        case gentra::car::rustCar: processLores (buffer, numChannels); break;
+        case gentra::car::red:
+            red.updateTargets();
+            if (numChannels > 0)
+                processDrive (buffer, numChannels);
+            else
+                red.skip (buffer.getNumSamples());
+            break;
+        case gentra::car::white: processEq (buffer, numChannels); break;
+        case gentra::car::silver: processDelay (buffer, numChannels); break;
+        default: break;
+    }
+}
+
+void GentraAudioProcessor::processBass (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    black.updateTargets();
+    if (! black.active())
+    {
+        bass.reset();
+        black.skip (buffer.getNumSamples());
+        return;
+    }
+    auto* const* data = buffer.getArrayOfWritePointers();
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const float amount = black.next (Stage::main);
+        const float freq = black.next (Stage::extraA);
+        const float tint = black.next (Stage::extraB);
+        const float wet = black.next (Stage::wet);
+        bass.setParams (amount, freq, tint);
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float x = data[ch][n];
+            data[ch][n] = wet * bass.processSample (ch, x) + (1.0f - wet) * x; // при Mix 100% — ровно эффект
+        }
+    }
+}
+
+void GentraAudioProcessor::processLores (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    rust.updateTargets();
+    if (! rust.active())
+    {
+        lores.reset();
+        rust.skip (buffer.getNumSamples());
+        return;
+    }
+    auto* const* data = buffer.getArrayOfWritePointers();
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const float amount = rust.next (Stage::main);
+        const float bits = rust.next (Stage::extraA);
+        const float rate = rust.next (Stage::extraB);
+        const float wet = rust.next (Stage::wet);
+        lores.setParams (amount, bits, rate);
+        const bool capture = lores.tick();
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float x = data[ch][n];
+            data[ch][n] = wet * lores.processSample (ch, x, capture) + (1.0f - wet) * x;
+        }
     }
 }
 
@@ -346,44 +385,45 @@ void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int n
     }
 }
 
-// Белая и серебряная — после красной: эквалайзер, затем дилей.
-void GentraAudioProcessor::processEqAndDelay (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+void GentraAudioProcessor::processEq (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
 {
-    const int numSamples = buffer.getNumSamples();
-    auto* const* data = buffer.getArrayOfWritePointers();
-
     white.updateTargets();
-    silver.updateTargets();
-    const bool eqOn = white.active();
-    const bool delayOn = silver.active();
-    if (! eqOn)
+    if (! white.active())
     {
         eq.reset();
-        white.skip (numSamples);
+        white.skip (buffer.getNumSamples());
+        return;
     }
+    auto* const* data = buffer.getArrayOfWritePointers();
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const float volume = white.next (Stage::main);
+        const float low = white.next (Stage::extraA);
+        const float high = white.next (Stage::extraB);
+        const float mid = white.next (Stage::extraC);
+        const float wet = white.next (Stage::wet);
+        eq.setParams (volume, low, mid, high);
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float x = data[ch][n];
+            data[ch][n] = wet * eq.processSample (ch, x) + (1.0f - wet) * x;
+        }
+    }
+}
+
+void GentraAudioProcessor::processDelay (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    silver.updateTargets();
+    const bool delayOn = silver.active();
+    auto* const* data = buffer.getArrayOfWritePointers();
 
     // По темпу — длительность выбранной ноты; время ручки (мс) тогда не нужно.
     const bool sync = delaySync->load() > 0.5f;
     const double syncSeconds = gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed));
 
-    for (int n = 0; n < numSamples; ++n)
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
     {
-        if (eqOn)
-        {
-            const float volume = white.next (Stage::main);
-            const float low = white.next (Stage::extraA);
-            const float high = white.next (Stage::extraB);
-            const float mid = white.next (Stage::extraC);
-            const float wet = white.next (Stage::wet);
-            eq.setParams (volume, low, mid, high);
-
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                const float x = data[ch][n];
-                data[ch][n] = wet * eq.processSample (ch, x) + (1.0f - wet) * x;
-            }
-        }
-
         const float time = silver.next (Stage::main);
         const float feedback = silver.next (Stage::extraA);
         const float tone = silver.next (Stage::extraB);
@@ -468,7 +508,57 @@ void GentraAudioProcessor::setStateInformation (const void* data, int sizeInByte
 {
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            storeChain (getCarOrder());
+        }
+}
+
+namespace
+{
+const juce::Identifier carOrderId { "carOrder" }; // номера машин через пробел
+}
+
+GentraAudioProcessor::CarOrder GentraAudioProcessor::getCarOrder() const
+{
+    // Порча или старый пресет без порядка — порядок по умолчанию (каждый номер ровно один раз).
+    const auto tokens = juce::StringArray::fromTokens (apvts.state.getProperty (carOrderId).toString(), false);
+    if (tokens.size() != gentra::car::count)
+        return defaultOrder;
+    CarOrder order {};
+    int seen = 0;
+    for (int i = 0; i < gentra::car::count; ++i)
+    {
+        const int car = tokens[i].getIntValue();
+        if (car < 0 || car >= gentra::car::count || ((seen >> car) & 1))
+            return defaultOrder;
+        seen |= 1 << car;
+        order[static_cast<size_t> (i)] = car;
+    }
+    return order;
+}
+
+void GentraAudioProcessor::setCarOrder (const CarOrder& order)
+{
+    juce::StringArray tokens;
+    for (int car : order)
+        tokens.add (juce::String (car));
+    apvts.state.setProperty (carOrderId, tokens.joinIntoString (" "), nullptr);
+    storeChain (getCarOrder());
+}
+
+void GentraAudioProcessor::storeChain (const CarOrder& order) noexcept
+{
+    std::uint64_t packed = 0;
+    int shift = 0;
+    for (int car : order)
+        if (car == gentra::car::black || car == gentra::car::rustCar || car == gentra::car::red
+            || car == gentra::car::white || car == gentra::car::silver)
+        {
+            packed |= static_cast<std::uint64_t> (car + 1) << shift;
+            shift += 4;
+        }
+    chain.store (packed, std::memory_order_relaxed);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

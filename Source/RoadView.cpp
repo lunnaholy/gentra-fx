@@ -132,7 +132,7 @@ juce::Image clipTo (const juce::Image& overlay, const juce::Image& body)
             dst.setPixelColour (x, y, dst.getPixelColour (x, y).withMultipliedAlpha (src.getPixelColour (x, y).getFloatAlpha()));
     return out;
 }
-enum { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yellow, white };
+using namespace gentra::car;
 
 juce::Image asset (const char* name) { return RoadView::image (name); }
 

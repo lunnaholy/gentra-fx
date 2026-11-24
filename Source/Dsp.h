@@ -51,6 +51,12 @@ inline double delayDivisionSeconds (float index, double bpm) noexcept
 
 constexpr double pi = 3.14159265358979323846;
 
+// Номера машин: на дороге, в маске гаража и в порядке цепочки.
+namespace car
+{
+enum Id : int { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yellow, white, count };
+}
+
 inline bool changed (float a, float b) noexcept { return std::abs (a - b) > 0.0f; }
 
 // Линейно до порога, выше — tanh-колено; выход всегда в [-1, 1].

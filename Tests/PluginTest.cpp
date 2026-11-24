@@ -469,6 +469,87 @@ void automation (double sampleRate)
     }
 }
 
+// Порядок цепочки: от него зависит звук, смена — без щелчков, перестановка декоративных машин звук не трогает,
+// порядок живёт в пресете, битый — заменяется порядком по умолчанию.
+void chainOrder (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 64);
+    p.prepareToPlay (sampleRate, 64);
+    juce::Random rng (5);
+    juce::MidiBuffer midi;
+    CHECK (p.getCarOrder() == GentraAudioProcessor::defaultOrder);
+
+    auto whiteFirst = GentraAudioProcessor::defaultOrder; // чёрная, ржавая, белая, красная, серебряная, ...
+    std::swap (whiteFirst[2], whiteFirst[3]);
+
+    // Тихий синус: +12 дБ до дисторшна он сжимает, после — нет.
+    const auto level = [&]
+    {
+        settle (p, sampleRate, rng);
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 0.2));
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+            for (int ch = 0; ch < 2; ++ch)
+                buf.setSample (ch, n, 0.25f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / sampleRate)));
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        return rms (buf);
+    };
+    setParam (p, "drive", 100.0f);
+    setParam (p, "distMix", 100.0f);
+    setParam (p, "eqVolume", 12.0f);
+    const double redFirst = level();
+    p.setCarOrder (whiteFirst);
+    const double eqFirst = level();
+    std::printf ("chain %.0f Hz: drive then +12 dB %.3f, +12 dB then drive %.3f\n", sampleRate, redFirst, eqFirst);
+    CHECK (redFirst > 2.0 * eqFirst);
+
+    // Смена порядка посреди синуса: провал громкости гладкий (вторая разность как у синуса 2 кГц, см. driveClicks).
+    setParam (p, "drive", 0.0f);
+    setParam (p, "eqVolume", 0.0f);
+    settle (p, sampleRate, rng);
+    {
+        juce::AudioBuffer<float> buf (2, 64);
+        float y1 = 0.0f, y2 = 0.0f, worst = 0.0f;
+        for (int b = 0; b < static_cast<int> (0.1 * sampleRate / 64.0); ++b)
+        {
+            if (b == 10)
+                p.setCarOrder (GentraAudioProcessor::defaultOrder);
+            for (int n = 0; n < 64; ++n)
+                for (int ch = 0; ch < 2; ++ch)
+                    buf.setSample (ch, n, 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 2000.0 * (b * 64 + n) / sampleRate)));
+            p.processBlock (buf, midi);
+            for (int n = 0; n < 64; ++n)
+            {
+                const float y = buf.getSample (0, n);
+                if (b > 0)
+                    worst = juce::jmax (worst, std::abs (y - 2.0f * y1 + y2));
+                y2 = y1;
+                y1 = y;
+            }
+        }
+        std::printf ("chain %.0f Hz: order change 2nd diff %.3f\n", sampleRate, worst);
+        CHECK (worst < 0.06f);
+    }
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+
+    // Декоративные местами — звук тот же, без провала: прозрачно сразу.
+    auto decor = GentraAudioProcessor::defaultOrder;
+    std::swap (decor[6], decor[9]);
+    p.setCarOrder (decor);
+    CHECK (transparent (p, rng));
+
+    p.setCarOrder (whiteFirst);
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    GentraAudioProcessor q;
+    q.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (q.getCarOrder() == whiteFirst);
+    q.apvts.state.setProperty ("carOrder", "0 1 2 2 4 5 6 7 8 9 10 11", nullptr);
+    CHECK (q.getCarOrder() == GentraAudioProcessor::defaultOrder);
+}
+
 // Щелчки красной при включении и выключении. Синус 2 кГц, блоки по 64. Мерило — вторая разность выхода:
 // у гладкого синуса она ~0.04 (0.5·(2π·2000/fs)²), скачок даёт величину порядка самого скачка.
 void driveClicks (double sampleRate)
@@ -713,6 +794,7 @@ int main (int argc, char** argv)
         equalizer (sampleRate);
         delayCar (sampleRate);
         automation (sampleRate);
+        chainOrder (sampleRate);
     }
     driveClicks (44100.0);
     driveClicks (96000.0);
