@@ -36,12 +36,31 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
 private:
+    // Сглаженные параметры одной машины: главная ручка, два доп. параметра, итоговый wet (Mix с учётом вкл/выкл).
+    struct Stage
+    {
+        enum Index { main, extraA, extraB, wet, count };
+
+        std::array<std::atomic<float>*, count> raw {}; // для wet — параметр Mix
+        std::array<float, count> scale {};
+        std::atomic<float>* on = nullptr;
+        bool extraBKeepsAlive = false; // тонировка чёрной звучит и при нулевом басе
+        std::array<juce::SmoothedValue<float>, count> value;
+
+        float target (int i) const noexcept;
+        void prepare (double sampleRate) noexcept;
+        void snap() noexcept;
+        void updateTargets() noexcept;
+        void skip (int numSamples) noexcept;
+        bool active() const noexcept;
+        float next (int i) noexcept { return value[static_cast<size_t> (i)].getNextValue(); }
+    };
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    Stage makeStage (const char* mainId, const char* aId, float aScale, const char* bId, float bScale,
+                     const char* mixId, const char* onId, bool bKeepsAlive);
 
-    std::atomic<float>* bassParam = nullptr;
-    std::atomic<float>* loresParam = nullptr;
-
-    juce::SmoothedValue<float> bassSmoothed, loresSmoothed;
+    Stage black, rust;
     gentra::BassBoost bass;
     gentra::LoRes lores;
 

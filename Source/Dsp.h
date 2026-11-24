@@ -10,14 +10,17 @@ namespace gentra
 constexpr int maxChannels = 2;
 
 // ---- Константы для подстройки на слух ----
-constexpr double bassMaxDb     = 12.0;   // усиление шельфа при 100%
-constexpr double bassFreqHz    = 100.0;  // частота шельфа
-constexpr double bassQ         = 0.707;  // без резонансного горба
-constexpr float  clipThreshold = 0.8f;   // ниже порога клиппер ничего не делает (~ -2 dBFS)
-constexpr float  clipFadeIn    = 0.05f;  // клиппер плавно включается на первых 5% хода ручки
-constexpr double loresMinHz    = 1500.0; // частота sample-and-hold при 100%
-constexpr double loresMaxBits  = 16.0;   // битность при 0%
-constexpr double loresMinBits  = 4.0;    // битность при 100%
+constexpr double bassMaxDb     = 12.0;    // усиление шельфа при 100%
+constexpr double bassQ         = 0.707;   // без резонансного горба
+constexpr float  clipThreshold = 0.8f;    // ниже порога клиппер ничего не делает (~ -2 dBFS)
+constexpr float  fadeIn        = 0.05f;   // клиппер и тонировка плавно включаются на первых 5% хода
+constexpr double tintOpenHz    = 20000.0; // срез тонировки при 0%
+constexpr double tintClosedHz  = 800.0;   // срез тонировки при 100%
+constexpr double loresMaxBits  = 16.0;    // битность при 0%
+
+constexpr double pi = 3.14159265358979323846;
+
+inline bool changed (float a, float b) noexcept { return std::abs (a - b) > 0.0f; }
 
 // Линейно до порога, выше — tanh-колено; выход всегда в [-1, 1].
 inline float softClip (float x) noexcept
@@ -30,7 +33,58 @@ inline float softClip (float x) noexcept
     return std::copysign (clipThreshold + knee * std::tanh ((a - clipThreshold) / knee), x);
 }
 
-// Low-shelf (RBJ, TDF-II) + мягкий клиппер.
+// Biquad (TDF-II) с коэффициентами RBJ. Смена коэффициентов не сбрасывает состояние.
+struct Biquad
+{
+    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
+    std::array<double, maxChannels> z1 {}, z2 {};
+
+    void reset() noexcept
+    {
+        z1 = {};
+        z2 = {};
+    }
+
+    double process (int channel, double in) noexcept
+    {
+        const auto ch = static_cast<size_t> (channel);
+        const double out = b0 * in + z1[ch];
+        z1[ch] = b1 * in - a1 * out + z2[ch];
+        z2[ch] = b2 * in - a2 * out;
+        return out;
+    }
+
+    void setLowShelf (double fs, double freq, double q, double gainDb) noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0);
+        const double w0 = 2.0 * pi * freq / fs;
+        const double cosw = std::cos (w0);
+        const double k = 2.0 * std::sqrt (A) * std::sin (w0) / (2.0 * q);
+        const double a0 = (A + 1.0) + (A - 1.0) * cosw + k;
+
+        b0 = A * ((A + 1.0) - (A - 1.0) * cosw + k) / a0;
+        b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cosw) / a0;
+        b2 = A * ((A + 1.0) - (A - 1.0) * cosw - k) / a0;
+        a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cosw) / a0;
+        a2 = ((A + 1.0) + (A - 1.0) * cosw - k) / a0;
+    }
+
+    void setLowPass (double fs, double freq, double q) noexcept
+    {
+        const double w0 = 2.0 * pi * std::min (freq, 0.45 * fs) / fs;
+        const double cosw = std::cos (w0);
+        const double alpha = std::sin (w0) / (2.0 * q);
+        const double a0 = 1.0 + alpha;
+
+        b0 = (1.0 - cosw) * 0.5 / a0;
+        b1 = (1.0 - cosw) / a0;
+        b2 = b0;
+        a1 = -2.0 * cosw / a0;
+        a2 = (1.0 - alpha) / a0;
+    }
+};
+
+// Чёрная машина: low-shelf -> мягкий клиппер -> тонировка (lowpass).
 class BassBoost
 {
 public:
@@ -42,67 +96,49 @@ public:
 
     void reset() noexcept
     {
-        z1 = {};
-        z2 = {};
-        coeffAmount = -1.0f;
+        shelf.reset();
+        tint.reset();
+        last = { -1.0f, -1.0f, -1.0f };
         countdown = 0;
     }
 
-    // Вызывать раз в сэмпл-фрейм; коэффициенты пересчитываются не чаще раза в 16 сэмплов.
-    void setAmount (float amount) noexcept
+    // Раз в сэмпл-фрейм; коэффициенты пересчитываются не чаще раза в 16 сэмплов.
+    void setParams (float amount, float freqHz, float tintAmount) noexcept
     {
-        clipMix = std::min (1.0f, amount / clipFadeIn);
+        clipMix = std::min (1.0f, amount / fadeIn);
+        tintMix = std::min (1.0f, tintAmount / fadeIn);
 
         if (countdown > 0)
             --countdown;
 
-        if (countdown == 0 && std::abs (amount - coeffAmount) > 0.0f)
+        if (countdown == 0 && (changed (amount, last[0]) || changed (freqHz, last[1]) || changed (tintAmount, last[2])))
         {
-            updateCoefficients (amount);
+            last = { amount, freqHz, tintAmount };
+            shelf.setLowShelf (fs, freqHz, bassQ, bassMaxDb * static_cast<double> (amount));
+            tint.setLowPass (fs, tintOpenHz * std::pow (tintClosedHz / tintOpenHz, static_cast<double> (tintAmount)), 0.707);
             countdown = 16;
         }
     }
 
     float processSample (int channel, float x) noexcept
     {
-        const auto ch = static_cast<size_t> (channel);
-        const double in = x;
-        const double out = b0 * in + z1[ch];
-        z1[ch] = b1 * in - a1 * out + z2[ch];
-        z2[ch] = b2 * in - a2 * out;
+        auto y = static_cast<float> (shelf.process (channel, x));
+        y += clipMix * (softClip (y) - y);
 
-        const auto y = static_cast<float> (out);
-        return y + clipMix * (softClip (y) - y);
+        // Фильтр тонировки работает всегда, чтобы при включении не было скачка из старого состояния.
+        const auto dark = static_cast<float> (tint.process (channel, y));
+        return y + tintMix * (dark - y);
     }
 
 private:
-    void updateCoefficients (float amount) noexcept
-    {
-        coeffAmount = amount;
-
-        const double pi = 3.14159265358979323846;
-        const double A = std::pow (10.0, bassMaxDb * static_cast<double> (amount) / 40.0);
-        const double w0 = 2.0 * pi * bassFreqHz / fs;
-        const double cosw = std::cos (w0);
-        const double k = 2.0 * std::sqrt (A) * std::sin (w0) / (2.0 * bassQ);
-        const double a0 = (A + 1.0) + (A - 1.0) * cosw + k;
-
-        b0 = A * ((A + 1.0) - (A - 1.0) * cosw + k) / a0;
-        b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cosw) / a0;
-        b2 = A * ((A + 1.0) - (A - 1.0) * cosw - k) / a0;
-        a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cosw) / a0;
-        a2 = ((A + 1.0) + (A - 1.0) * cosw - k) / a0;
-    }
-
     double fs = 44100.0;
-    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
-    std::array<double, maxChannels> z1 {}, z2 {};
-    float coeffAmount = -1.0f;
-    float clipMix = 0.0f;
+    Biquad shelf, tint;
+    std::array<float, 3> last {};
+    float clipMix = 0.0f, tintMix = 0.0f;
     int countdown = 0;
 };
 
-// Sample-and-hold с дробным шагом + квантование (mid-tread: тишина остаётся тишиной).
+// Ржавая машина: sample-and-hold с дробным шагом + квантование (mid-tread: тишина остаётся тишиной).
 class LoRes
 {
 public:
@@ -116,18 +152,19 @@ public:
     {
         held = {};
         phase = 1.0;
-        amount = -1.0f;
+        last = { -1.0f, -1.0f, -1.0f };
     }
 
-    void setAmount (float newAmount) noexcept
+    // minBits и minRateHz — битность и частота, до которых доходит эффект на 100%.
+    void setParams (float amount, float minBits, float minRateHz) noexcept
     {
-        if (std::abs (newAmount - amount) > 0.0f)
+        if (changed (amount, last[0]) || changed (minBits, last[1]) || changed (minRateHz, last[2]))
         {
-            amount = newAmount;
-            const auto t = static_cast<double> (newAmount);
-            // Целевая частота: лог-интерполяция от fs (0%) до loresMinHz (100%).
-            increment = std::min (1.0, std::pow (loresMinHz / fs, t));
-            const double bits = loresMaxBits + (loresMinBits - loresMaxBits) * t;
+            last = { amount, minBits, minRateHz };
+            const auto t = static_cast<double> (amount);
+            // Частота: лог-интерполяция от fs (0%) до minRateHz (100%).
+            increment = std::min (1.0, std::pow (std::min (1.0, static_cast<double> (minRateHz) / fs), t));
+            const double bits = loresMaxBits + (static_cast<double> (minBits) - loresMaxBits) * t;
             levels = std::pow (2.0, bits - 1.0);
         }
     }
@@ -158,6 +195,6 @@ private:
     double increment = 1.0;
     double levels = 32768.0;
     std::array<float, maxChannels> held {};
-    float amount = -1.0f;
+    std::array<float, 3> last {};
 };
 } // namespace gentra

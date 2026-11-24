@@ -7,24 +7,103 @@ namespace
 constexpr double smoothingSeconds = 0.05;
 }
 
+// ---------------- Stage ----------------
+
+float GentraAudioProcessor::Stage::target (int i) const noexcept
+{
+    if (i == wet && on->load() < 0.5f)
+        return 0.0f;
+    return raw[static_cast<size_t> (i)]->load() * scale[static_cast<size_t> (i)];
+}
+
+void GentraAudioProcessor::Stage::prepare (double sampleRate) noexcept
+{
+    for (auto& v : value)
+        v.reset (sampleRate, smoothingSeconds);
+    snap();
+}
+
+void GentraAudioProcessor::Stage::snap() noexcept
+{
+    for (int i = 0; i < count; ++i)
+        value[static_cast<size_t> (i)].setCurrentAndTargetValue (target (i));
+}
+
+void GentraAudioProcessor::Stage::updateTargets() noexcept
+{
+    for (int i = 0; i < count; ++i)
+        value[static_cast<size_t> (i)].setTargetValue (target (i));
+}
+
+void GentraAudioProcessor::Stage::skip (int numSamples) noexcept
+{
+    for (auto& v : value)
+        v.skip (numSamples);
+}
+
+// Машина простаивает, когда звучать нечему (главная ручка в нуле) или нечем (wet в нуле) и ничего не едет.
+// Простаивающая стадия не трогает буфер — отсюда bit-perfect при 0%.
+bool GentraAudioProcessor::Stage::active() const noexcept
+{
+    if (value[main].isSmoothing() || value[wet].isSmoothing() || (extraBKeepsAlive && value[extraB].isSmoothing()))
+        return true;
+
+    const bool hasEffect = value[main].getTargetValue() > 0.0f
+                           || (extraBKeepsAlive && value[extraB].getTargetValue() > 0.0f);
+    return hasEffect && value[wet].getTargetValue() > 0.0f;
+}
+
+// ---------------- Processor ----------------
+
 GentraAudioProcessor::GentraAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMS", createParameterLayout())
+      apvts (*this, nullptr, "PARAMS", createParameterLayout()),
+      black (makeStage ("bass", "bassFreq", 1.0f, "tint", 0.01f, "bassMix", "bassOn", true)),
+      rust (makeStage ("lores", "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", false))
 {
-    bassParam = apvts.getRawParameterValue ("bass");
-    loresParam = apvts.getRawParameterValue ("lores");
+}
+
+GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId, const char* aId, float aScale,
+                                                             const char* bId, float bScale,
+                                                             const char* mixId, const char* onId, bool bKeepsAlive)
+{
+    Stage s;
+    s.raw = { apvts.getRawParameterValue (mainId), apvts.getRawParameterValue (aId),
+              apvts.getRawParameterValue (bId), apvts.getRawParameterValue (mixId) };
+    s.scale = { 0.01f, aScale, bScale, 0.01f };
+    s.on = apvts.getRawParameterValue (onId);
+    s.extraBKeepsAlive = bKeepsAlive;
+    return s;
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::createParameterLayout()
 {
-    const juce::NormalisableRange<float> percent (0.0f, 100.0f, 0.1f);
-    const auto attributes = juce::AudioParameterFloatAttributes().withLabel ("%");
+    using Float = juce::AudioParameterFloat;
+    using Attributes = juce::AudioParameterFloatAttributes;
 
+    const juce::NormalisableRange<float> percent (0.0f, 100.0f, 0.1f);
+    const auto pct = Attributes().withLabel ("%");
+
+    juce::NormalisableRange<float> rate (0.5f, 12.0f, 0.01f);
+    rate.setSkewForCentre (3.0f);
+
+    // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом.
     return {
-        std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, attributes),
-        std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "lores", 1 }, "Lo-Res", percent, 0.0f, attributes)
+        std::make_unique<Float> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "bassFreq", 2 }, "Bass Freq",
+                                 juce::NormalisableRange<float> (40.0f, 150.0f, 1.0f), 100.0f, Attributes().withLabel ("Hz")),
+        std::make_unique<Float> (juce::ParameterID { "tint", 2 }, "Tint", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "bassMix", 2 }, "Bass Mix", percent, 100.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "bassOn", 2 }, "Bass On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "lores", 1 }, "Lo-Res", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "loresBits", 2 }, "Lo-Res Min Bits",
+                                 juce::NormalisableRange<float> (2.0f, 12.0f, 0.1f), 4.0f, Attributes().withLabel ("bit")),
+        std::make_unique<Float> (juce::ParameterID { "loresRate", 2 }, "Lo-Res Min Rate", rate, 1.5f, Attributes().withLabel ("kHz")),
+        std::make_unique<Float> (juce::ParameterID { "loresMix", 2 }, "Lo-Res Mix", percent, 100.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "loresOn", 2 }, "Lo-Res On", true)
     };
 }
 
@@ -32,19 +111,16 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     bass.prepare (sampleRate);
     lores.prepare (sampleRate);
-
-    bassSmoothed.reset (sampleRate, smoothingSeconds);
-    loresSmoothed.reset (sampleRate, smoothingSeconds);
-    bassSmoothed.setCurrentAndTargetValue (bassParam->load() * 0.01f);
-    loresSmoothed.setCurrentAndTargetValue (loresParam->load() * 0.01f);
+    black.prepare (sampleRate);
+    rust.prepare (sampleRate);
 }
 
 void GentraAudioProcessor::reset()
 {
     bass.reset();
     lores.reset();
-    bassSmoothed.setCurrentAndTargetValue (bassParam->load() * 0.01f);
-    loresSmoothed.setCurrentAndTargetValue (loresParam->load() * 0.01f);
+    black.snap();
+    rust.snap();
 }
 
 bool GentraAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -62,17 +138,22 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
-    bassSmoothed.setTargetValue (bassParam->load() * 0.01f);
-    loresSmoothed.setTargetValue (loresParam->load() * 0.01f);
+    black.updateTargets();
+    rust.updateTargets();
 
-    // Стадия с ручкой на нуле пропускается целиком: это и даёт bit-perfect при 0%.
-    const bool bassOn = bassSmoothed.isSmoothing() || bassSmoothed.getTargetValue() > 0.0f;
-    const bool loresOn = loresSmoothed.isSmoothing() || loresSmoothed.getTargetValue() > 0.0f;
+    const bool bassOn = black.active();
+    const bool loresOn = rust.active();
 
     if (! bassOn)
+    {
         bass.reset();
+        black.skip (numSamples);
+    }
     if (! loresOn)
+    {
         lores.reset();
+        rust.skip (numSamples);
+    }
     if (! bassOn && ! loresOn)
         return;
 
@@ -83,17 +164,33 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         if (bassOn)
         {
-            bass.setAmount (bassSmoothed.getNextValue());
+            const float amount = black.next (Stage::main);
+            const float freq = black.next (Stage::extraA);
+            const float tint = black.next (Stage::extraB);
+            const float wet = black.next (Stage::wet);
+            bass.setParams (amount, freq, tint);
+
             for (int ch = 0; ch < numChannels; ++ch)
-                data[ch][n] = bass.processSample (ch, data[ch][n]);
+            {
+                const float x = data[ch][n];
+                data[ch][n] = wet * bass.processSample (ch, x) + (1.0f - wet) * x; // при Mix 100% — ровно эффект
+            }
         }
 
         if (loresOn)
         {
-            lores.setAmount (loresSmoothed.getNextValue());
+            const float amount = rust.next (Stage::main);
+            const float bits = rust.next (Stage::extraA);
+            const float rate = rust.next (Stage::extraB);
+            const float wet = rust.next (Stage::wet);
+            lores.setParams (amount, bits, rate);
             const bool capture = lores.tick();
+
             for (int ch = 0; ch < numChannels; ++ch)
-                data[ch][n] = lores.processSample (ch, data[ch][n], capture);
+            {
+                const float x = data[ch][n];
+                data[ch][n] = wet * lores.processSample (ch, x, capture) + (1.0f - wet) * x;
+            }
         }
     }
 }
