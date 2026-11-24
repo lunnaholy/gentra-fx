@@ -9,7 +9,7 @@ namespace
 // и пересоберите. Размеры ниже — в пикселях окна; разрешение картинки может быть любым,
 // важны только пропорции.
 //   sky.jpg            900×300   небо до горизонта (растягивается)
-//   mountains.png      543×60    горы, бесшовно по горизонтали, низ = горизонт
+//   mountains.png      543×60    горы, бесшовно по горизонтали, низ = горизонт; на экране × mountainScale
 //   skyline.png        694×140   город, бесшовно, низ = горизонт
 //   road.jpg           1333×390  дорога от верха бордюра (y = 184.5) вниз, бесшовно; полосы — laneY()
 //   lamp.png           40×150    фонарь, повторяется каждые 280, низ = верх дороги
@@ -22,6 +22,8 @@ namespace
 constexpr float rearWheelX = 0.222f, frontWheelX = 0.81f;
 constexpr float wheelY = 0.083f; // центр колеса над асфальтом
 constexpr float wheelR = 0.083f; // радиус колеса
+// Горы крупнее картинки, чтобы выглядывать из-за города (город ~187 px, низкая застройка ~60 px).
+constexpr float mountainScale = 2.5f;
 // Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
 constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 // Под бит DAW: сколько держится уровень низа между долями, с; во сколько слабее несильные доли.
@@ -697,7 +699,8 @@ void RoadView::drawScene (juce::Graphics& g) const
     const float ground = scroll + camU;
 
     g.drawImage (sky, { 0.0f, 0.0f, W, juce::jmax (40.0f, horizon) });
-    drawStrip (g, mountains, ground * 0.03f, 543.0f, 543.0f, 60.0f * cityScale, horizon - 60.0f * cityScale, 0.0f, W);
+    const float mw = 543.0f * mountainScale, mh = 60.0f * mountainScale;
+    drawStrip (g, mountains, ground * 0.03f, mw, mw, mh, horizon - mh, 0.0f, W);
 
     {
         // Город чуть приближается вместе с камерой.
