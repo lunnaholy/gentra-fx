@@ -30,14 +30,17 @@ constexpr double delayMaxSeconds = 4.0;   // длина линии дилея: 1
 constexpr double delayGlideTau = 0.05;    // постоянная плавной смены времени дилея, с (заметная езда ~0.2 с)
 
 // Длительности нот для дилея по темпу, в четвертях (параметр «Нота» — индекс в этом списке).
-constexpr int numDelayDivisions = 13;
+// По возрастанию: каждая прямая нота, триоль следующей (вдвое длиннее) и она же с точкой.
+constexpr int numDelayDivisions = 19;
 constexpr std::array<double, numDelayDivisions> delayDivisionBeats {
+    0.03125, 1.0 / 24.0, 0.046875, 0.0625, 1.0 / 12.0, 0.09375,
     0.125, 1.0 / 6.0, 0.1875, 0.25, 1.0 / 3.0, 0.375, 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0
 };
 constexpr std::array<const char*, numDelayDivisions> delayDivisionNames {
+    "1/128", "1/64T", "1/128.", "1/64", "1/32T", "1/64.",
     "1/32", "1/16T", "1/32.", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "1/2T", "1/4.", "1/2"
 };
-constexpr int defaultDelayDivision = 6; // 1/8
+constexpr int defaultDelayDivision = 12; // 1/8
 
 // Длительность ноты в секундах при темпе bpm (четвертей в минуту); index — значение параметра «Нота».
 inline double delayDivisionSeconds (float index, double bpm) noexcept

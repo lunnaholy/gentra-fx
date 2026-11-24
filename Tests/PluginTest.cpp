@@ -422,15 +422,20 @@ void delayCar (double sampleRate)
     }
 
     // По нотам с темпом хоста: 90 BPM, нота 1/4 — повтор через 60/90 с; хост видит «1/4».
+    // Самая короткая — 1/128: при 90 BPM повтор через 60/90/32 с.
     {
         FakeHead head;
         head.info.setBpm (90.0); // транспорт стоит, но темп хост сообщает
         p.setPlayHead (&head);
         setParam (p, "delaySync", 1.0f);
-        setParam (p, "delayNote", 9.0f);
+        setParam (p, "delayNote", 15.0f); // 1/4
         CHECK (p.apvts.getParameter ("delayNote")->getCurrentValueAsText() == "1/4");
         const auto out = impulse (0.8);
         CHECK (std::abs (out.getSample (0, juce::roundToInt (60.0 / 90.0 * sampleRate)) - 1.0f) < 1.0e-6f);
+        setParam (p, "delayNote", 0.0f);
+        CHECK (p.apvts.getParameter ("delayNote")->getCurrentValueAsText() == "1/128");
+        const auto shortest = impulse (0.1);
+        CHECK (std::abs (shortest.getSample (0, juce::roundToInt (60.0 / 90.0 / 32.0 * sampleRate)) - 1.0f) < 1.0e-6f);
         p.setPlayHead (nullptr);
     }
 
