@@ -18,8 +18,7 @@ struct Box final : juce::Component
     void paint (juce::Graphics&) override;
 };
 
-class GentraAudioProcessorEditor final : public juce::AudioProcessorEditor,
-                                         private juce::Timer
+class GentraAudioProcessorEditor final : public juce::AudioProcessorEditor
 {
 public:
     explicit GentraAudioProcessorEditor (GentraAudioProcessor&);
@@ -39,7 +38,6 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
 
-    void timerCallback() override;
     void showPopup (int car);
     void updateOnButton();
 
@@ -47,9 +45,6 @@ private:
     BoxLook look;
 
     RoadView road;
-
-    Box queue;
-    std::array<juce::TextButton, RoadView::numWorking> queueButtons;
 
     Box popup;
     juce::TextButton onButton, closeButton { "X" };

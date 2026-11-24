@@ -53,12 +53,6 @@ void BoxLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const ju
     g.fillRect (r);
     g.setColour (b.isEnabled() ? juce::Colours::black : juce::Colours::grey);
     g.drawRect (r, 2.0f);
-
-    if (b.getProperties()["current"])
-    {
-        g.setColour (hot);
-        g.drawRect (r.reduced (2.0f), 4.0f);
-    }
 }
 
 juce::Font BoxLook::getTextButtonFont (juce::TextButton&, int)
@@ -87,20 +81,6 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     addAndMakeVisible (road);
     road.onSelectionChanged = [this] (int car) { showPopup (car); };
 
-    // Очередь: номера рабочих машин. Клик открывает машину.
-    for (int i = 0; i < RoadView::numWorking; ++i)
-    {
-        auto& b = queueButtons[static_cast<size_t> (i)];
-        const auto colour = RoadView::bodyColour (i);
-        b.setButtonText (juce::String (i + 1));
-        b.setTooltip (RoadView::effectName (i));
-        b.setColour (juce::TextButton::buttonColourId, colour);
-        b.setColour (juce::TextButton::textColourOffId, colour.getPerceivedBrightness() > 0.5f ? juce::Colours::black : juce::Colours::white);
-        b.onClick = [this, i] { road.select (road.getSelected() == i ? -1 : i); };
-        queue.addAndMakeVisible (b);
-    }
-    addAndMakeVisible (queue);
-
     // Всплывающая коробка открытой машины.
     onButton.setClickingTogglesState (true);
     onButton.setColour (juce::TextButton::buttonColourId, no);
@@ -123,7 +103,6 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     addChildComponent (popup);
 
     setSize (RoadView::width, RoadView::height);
-    startTimerHz (10);
 }
 
 GentraAudioProcessorEditor::~GentraAudioProcessorEditor()
@@ -134,12 +113,6 @@ GentraAudioProcessorEditor::~GentraAudioProcessorEditor()
 void GentraAudioProcessorEditor::resized()
 {
     road.setBounds (getLocalBounds());
-
-    queue.setTransform ({});
-    queue.setBounds (206, 6, 10 + RoadView::numWorking * 44, 35);
-    for (int i = 0; i < RoadView::numWorking; ++i)
-        queueButtons[static_cast<size_t> (i)].setBounds (5 + i * 44, 5, 40, 25);
-    rotate (queue, 0.6f);
 
     popup.setTransform ({});
     popup.setBounds ((getWidth() - 300) / 2, getHeight() - 9 - 96, 300, 96);
@@ -157,13 +130,6 @@ void GentraAudioProcessorEditor::resized()
 
 void GentraAudioProcessorEditor::showPopup (int car)
 {
-    for (int i = 0; i < RoadView::numWorking; ++i)
-    {
-        auto& b = queueButtons[static_cast<size_t> (i)];
-        b.getProperties().set ("current", i == car);
-        b.repaint();
-    }
-
     onAttachment.reset();
     for (auto& row : rows)
         row.attachment.reset();
@@ -194,14 +160,4 @@ void GentraAudioProcessorEditor::updateOnButton()
 {
     onButton.setButtonText (onButton.getToggleState() ? ru ("Включен") : ru ("Выключен"));
     onButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-}
-
-void GentraAudioProcessorEditor::timerCallback()
-{
-    // Выключенная машина в очереди бледнеет (параметр может прийти из автоматизации).
-    for (int i = 0; i < RoadView::numWorking; ++i)
-    {
-        const bool on = gentraProcessor.apvts.getRawParameterValue (RoadView::working[static_cast<size_t> (i)].on)->load() > 0.5f;
-        queueButtons[static_cast<size_t> (i)].setAlpha (on ? 1.0f : 0.55f);
-    }
 }
