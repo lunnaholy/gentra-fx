@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 
 #include "Dsp.h"
 
@@ -67,9 +68,15 @@ private:
     Stage makeStage (const char* mainId, const char* aId, float aScale, const char* bId, float bScale,
                      const char* mixId, const char* onId, bool bKeepsAlive);
 
-    Stage black, rust;
+    void processDrive (juce::AudioBuffer<float>&, int numChannels) noexcept;
+
+    Stage black, rust, red;
     gentra::BassBoost bass;
     gentra::LoRes lores;
+    gentra::Drive drive;
+    // ×2, IIR-полуполосные фильтры. Сухой сигнал смешивается внутри — проходит те же фильтры, фазы совпадают.
+    static constexpr int driveChunk = 64;
+    juce::dsp::Oversampling<float> oversampling { gentra::maxChannels, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
 
     std::atomic<float> bassLevel { 0.0f };
 

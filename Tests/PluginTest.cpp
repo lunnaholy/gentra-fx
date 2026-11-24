@@ -61,6 +61,19 @@ bool transparent (GentraAudioProcessor& p, juce::Random& rng)
     return bitExact (buf, ref);
 }
 
+// Амплитуда частоты freq в канале 0 (корреляция с синусом и косинусом).
+double amplitudeAt (const juce::AudioBuffer<float>& b, double freq, double sampleRate)
+{
+    double re = 0.0, im = 0.0;
+    for (int n = 0; n < b.getNumSamples(); ++n)
+    {
+        const double w = juce::MathConstants<double>::twoPi * freq * n / sampleRate;
+        re += b.getSample (0, n) * std::cos (w);
+        im += b.getSample (0, n) * std::sin (w);
+    }
+    return 2.0 * std::sqrt (re * re + im * im) / b.getNumSamples();
+}
+
 bool allFinite (const juce::AudioBuffer<float>& b)
 {
     for (int ch = 0; ch < b.getNumChannels(); ++ch)
@@ -128,8 +141,9 @@ void run (double sampleRate)
         CHECK (changes > 0 && changes <= expected + 2);
     }
 
-    // 4. Обе на 100%: тишина остаётся тишиной.
+    // 4. Все на 100%: тишина остаётся тишиной.
     setParam (p, "bass", 100.0f);
+    setParam (p, "drive", 100.0f);
     p.prepareToPlay (sampleRate, 512);
     {
         juce::AudioBuffer<float> buf (2, 2048);
@@ -143,6 +157,7 @@ void run (double sampleRate)
     {
         setParam (p, "bass", rng.nextFloat() * 100.0f);
         setParam (p, "lores", rng.nextFloat() * 100.0f);
+        setParam (p, "drive", rng.nextFloat() * 100.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
         fillNoise (buf, rng, 1.0f);
         p.processBlock (buf, midi);
@@ -153,6 +168,7 @@ void run (double sampleRate)
     // 6. Вернули ручки в 0 — после сглаживания снова побитово прозрачно.
     setParam (p, "bass", 0.0f);
     setParam (p, "lores", 0.0f);
+    setParam (p, "drive", 0.0f);
     {
         juce::AudioBuffer<float> settle (2, static_cast<int> (sampleRate * 0.2));
         fillNoise (settle, rng, 0.5f);
@@ -170,12 +186,16 @@ void run (double sampleRate)
     setParam (p, "lores", 100.0f);
     setParam (p, "bassMix", 0.0f);
     setParam (p, "loresOn", 0.0f);
+    setParam (p, "drive", 100.0f);
+    setParam (p, "distOn", 0.0f);
     settle (p, sampleRate, rng);
     CHECK (transparent (p, rng));
     setParam (p, "bassMix", 100.0f);
     setParam (p, "loresOn", 1.0f);
+    setParam (p, "distOn", 1.0f);
     setParam (p, "bass", 0.0f);
     setParam (p, "lores", 0.0f);
+    setParam (p, "drive", 0.0f);
 
     // 8. Тонировка глушит верх даже при нулевом басе, а вернувшись в 0 — снова прозрачно.
     {
@@ -192,7 +212,32 @@ void run (double sampleRate)
         CHECK (transparent (p, rng));
     }
 
-    // 9. Метр низа: бочка 50 Гц видна, тишина — ноль.
+    // 9. Драйв 100%, Mix 100%, тон открыт: синус становится почти меандром (3-я гармоника ~1/3), громкость примерно та же.
+    {
+        setParam (p, "drive", 100.0f);
+        setParam (p, "distMix", 100.0f);
+        setParam (p, "distTone", 100.0f);
+        settle (p, sampleRate, rng);
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 0.5));
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+            for (int ch = 0; ch < 2; ++ch)
+                buf.setSample (ch, n, 0.25f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 220.0 * n / sampleRate)));
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        const double level = rms (buf), inRms = 0.25 / std::sqrt (2.0);
+        const double third = amplitudeAt (buf, 660.0, sampleRate) / amplitudeAt (buf, 220.0, sampleRate);
+        std::printf ("drive %.0f Hz: 3rd harmonic %.2f (square 0.33), level %+.1f dB\n", sampleRate, third, 20.0 * std::log10 (level / inRms));
+        CHECK (third > 0.25);
+        CHECK (std::abs (20.0 * std::log10 (level / inRms)) < 4.0);
+
+        setParam (p, "drive", 0.0f);
+        setParam (p, "distMix", 45.0f);
+        setParam (p, "distTone", 50.0f);
+        settle (p, sampleRate, rng);
+        CHECK (transparent (p, rng));
+    }
+
+    // 10. Метр низа: бочка 50 Гц видна, тишина — ноль.
     {
         p.takeBassLevel();
         juce::AudioBuffer<float> buf (2, 4096);
@@ -207,7 +252,7 @@ void run (double sampleRate)
         CHECK (p.takeBassLevel() <= 0.0f);
     }
 
-    // 10. Состояние переживает сохранение/загрузку.
+    // 11. Состояние переживает сохранение/загрузку.
     setParam (p, "bass", 37.0f);
     setParam (p, "lores", 82.0f);
     juce::MemoryBlock state;
@@ -374,6 +419,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     GentraAudioProcessor p;
     setParam (p, "bass", percent);
     setParam (p, "lores", percent);
+    setParam (p, "drive", percent);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());

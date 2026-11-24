@@ -62,6 +62,7 @@ target_link_libraries(SauceGentraFX
     PRIVATE
         GentraAssets
         juce::juce_audio_utils
+        juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -71,5 +72,5 @@ target_link_libraries(SauceGentraFX
 # Кадр интерфейса без DAW: build/GentraTest --snapshot кадр.png [ручки, %] [кадров анимации]
 enable_testing()
 add_executable(GentraTest Tests/PluginTest.cpp)
-target_link_libraries(GentraTest PRIVATE SauceGentraFX juce::juce_audio_utils)
+target_link_libraries(GentraTest PRIVATE SauceGentraFX juce::juce_audio_utils juce::juce_dsp)
 add_test(NAME GentraTest COMMAND GentraTest)

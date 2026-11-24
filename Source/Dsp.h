@@ -17,6 +17,10 @@ constexpr float  fadeIn        = 0.05f;   // клиппер и тонировк�
 constexpr double tintOpenHz    = 20000.0; // срез тонировки при 0%
 constexpr double tintClosedHz  = 800.0;   // срез тонировки при 100%
 constexpr double loresMaxBits  = 16.0;    // битность при 0%
+constexpr double driveMaxDb    = 36.0;    // предусиление дисторшна при 100%
+constexpr double driveRefLevel = 0.25;    // синус этой амплитуды выходит с тем же пиком при любом драйве
+constexpr double toneDarkHz    = 800.0;   // срез тона при 0%
+constexpr double toneBrightHz  = 16000.0; // срез тона при 100%
 
 constexpr double pi = 3.14159265358979323846;
 
@@ -196,5 +200,56 @@ private:
     double levels = 32768.0;
     std::array<float, maxChannels> held {};
     std::array<float, 3> last {};
+};
+
+// Красная машина: предусиление -> tanh -> тон (lowpass) -> компенсация громкости.
+// Работает на удвоенной частоте (оверсэмплинг — в процессоре), fs — уже удвоенная.
+class Drive
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        fs = sampleRate;
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        tone.reset();
+        last = { -1.0f, -1.0f };
+        countdown = 0;
+    }
+
+    void setParams (float amount, float toneAmount) noexcept
+    {
+        if (changed (amount, last[0]))
+        {
+            last[0] = amount;
+            gain = static_cast<float> (std::pow (10.0, driveMaxDb * static_cast<double> (amount) / 20.0));
+            comp = static_cast<float> (driveRefLevel / std::tanh (static_cast<double> (gain) * driveRefLevel));
+        }
+
+        if (countdown > 0)
+            --countdown;
+
+        if (countdown == 0 && changed (toneAmount, last[1]))
+        {
+            last[1] = toneAmount;
+            tone.setLowPass (fs, toneDarkHz * std::pow (toneBrightHz / toneDarkHz, static_cast<double> (toneAmount)), 0.707);
+            countdown = 16;
+        }
+    }
+
+    float processSample (int channel, float x) noexcept
+    {
+        return comp * static_cast<float> (tone.process (channel, std::tanh (gain * x)));
+    }
+
+private:
+    double fs = 88200.0;
+    Biquad tone;
+    float gain = 1.0f, comp = 1.0f;
+    std::array<float, 2> last {};
+    int countdown = 0;
 };
 } // namespace gentra

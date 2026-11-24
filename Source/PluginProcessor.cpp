@@ -11,7 +11,7 @@ constexpr double smoothingSeconds = 0.05;
 
 float GentraAudioProcessor::Stage::target (int i) const noexcept
 {
-    if (i == wet && on->load() < 0.5f)
+    if ((i == wet && on->load() < 0.5f) || raw[static_cast<size_t> (i)] == nullptr)
         return 0.0f;
     return raw[static_cast<size_t> (i)]->load() * scale[static_cast<size_t> (i)];
 }
@@ -61,7 +61,8 @@ GentraAudioProcessor::GentraAudioProcessor()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout()),
       black (makeStage ("bass", "bassFreq", 1.0f, "tint", 0.01f, "bassMix", "bassOn", true)),
-      rust (makeStage ("lores", "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", false))
+      rust (makeStage ("lores", "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", false)),
+      red (makeStage ("drive", "distTone", 0.01f, nullptr, 0.0f, "distMix", "distOn", false))
 {
 }
 
@@ -71,7 +72,7 @@ GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId,
 {
     Stage s;
     s.raw = { apvts.getRawParameterValue (mainId), apvts.getRawParameterValue (aId),
-              apvts.getRawParameterValue (bId), apvts.getRawParameterValue (mixId) };
+              bId != nullptr ? apvts.getRawParameterValue (bId) : nullptr, apvts.getRawParameterValue (mixId) };
     s.scale = { 0.01f, aScale, bScale, 0.01f };
     s.on = apvts.getRawParameterValue (onId);
     s.extraBKeepsAlive = bKeepsAlive;
@@ -89,7 +90,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::NormalisableRange<float> rate (0.5f, 12.0f, 0.01f);
     rate.setSkewForCentre (3.0f);
 
-    // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом.
+    // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом, 3 — красная машина.
     return {
         std::make_unique<Float> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "bassFreq", 2 }, "Bass Freq",
@@ -103,7 +104,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
                                  juce::NormalisableRange<float> (2.0f, 12.0f, 0.1f), 4.0f, Attributes().withLabel ("bit")),
         std::make_unique<Float> (juce::ParameterID { "loresRate", 2 }, "Lo-Res Min Rate", rate, 1.5f, Attributes().withLabel ("kHz")),
         std::make_unique<Float> (juce::ParameterID { "loresMix", 2 }, "Lo-Res Mix", percent, 100.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "loresOn", 2 }, "Lo-Res On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "loresOn", 2 }, "Lo-Res On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "drive", 3 }, "Drive", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "distTone", 3 }, "Drive Tone", percent, 50.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "distMix", 3 }, "Drive Mix", percent, 45.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "distOn", 3 }, "Drive On", true)
     };
 }
 
@@ -115,15 +121,21 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     meterLp = 0.0f;
     black.prepare (sampleRate);
     rust.prepare (sampleRate);
+    red.prepare (sampleRate);
+    oversampling.initProcessing (driveChunk);
+    drive.prepare (2.0 * sampleRate);
 }
 
 void GentraAudioProcessor::reset()
 {
     bass.reset();
     lores.reset();
+    oversampling.reset();
+    drive.reset();
     meterLp = 0.0f;
     black.snap();
     rust.snap();
+    red.snap();
 }
 
 bool GentraAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -195,6 +207,18 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
 
+    red.updateTargets();
+    if (red.active() && numChannels > 0)
+        processDrive (buffer, numChannels);
+    else
+    {
+        // ponytail: при выключении сухой сигнал перескакивает с фильтров оверсэмплинга на прямой — фазовый сдвиг
+        // IIR в пару сэмплов на верхах. Если будет слышен щелчок — короткий кроссфейд обхода.
+        oversampling.reset();
+        drive.reset();
+        red.skip (numSamples);
+    }
+
     // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
     if (numChannels > 0)
     {
@@ -207,6 +231,41 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
         if (peak > bassLevel.load (std::memory_order_relaxed))
             bassLevel.store (peak, std::memory_order_relaxed);
+    }
+}
+
+// Последняя в цепочке, поэтому блоком, а не в общем цикле по сэмплам: оверсэмплинг работает кусками.
+void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), static_cast<size_t> (numChannels),
+                                        static_cast<size_t> (buffer.getNumSamples()));
+
+    for (size_t start = 0; start < block.getNumSamples(); start += driveChunk)
+    {
+        const size_t n = juce::jmin (static_cast<size_t> (driveChunk), block.getNumSamples() - start);
+        std::array<float, driveChunk> amount {}, tone {}, wet {};
+        for (size_t i = 0; i < n; ++i)
+        {
+            amount[i] = red.next (Stage::main);
+            tone[i] = red.next (Stage::extraA);
+            // Эффект плавно входит на первых процентах драйва: при 0% выход — чистый сухой сигнал.
+            wet[i] = red.next (Stage::wet) * juce::jmin (1.0f, amount[i] / gentra::fadeIn);
+        }
+
+        auto sub = block.getSubBlock (start, n);
+        auto up = oversampling.processSamplesUp (sub);
+        for (size_t k = 0; k < up.getNumSamples(); ++k)
+        {
+            const size_t i = k / 2;
+            drive.setParams (amount[i], tone[i]);
+            for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
+            {
+                const float x = up.getSample (static_cast<int> (ch), static_cast<int> (k));
+                up.setSample (static_cast<int> (ch), static_cast<int> (k),
+                              wet[i] * drive.processSample (static_cast<int> (ch), x) + (1.0f - wet[i]) * x);
+            }
+        }
+        oversampling.processSamplesDown (sub);
     }
 }
 
