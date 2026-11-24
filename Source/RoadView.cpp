@@ -86,6 +86,9 @@ juce::Image asset (const char* name) { return RoadView::image (name); }
 
 const juce::Identifier hiddenId { "hiddenCars" };   // битовая маска скрытых машин в состоянии плагина
 const juce::Identifier hiddenOffId { "hiddenOff" }; // какие из них были выключены до скрытия
+// Все 12 в ширину экрана — тесно, быстрые моргают треть времени. По умолчанию в гараже — машины эффектов,
+// до которых дальше всего по бэклогу; с ними моргание ~5–7% времени.
+constexpr int defaultHidden = (1 << green) | (1 << orange) | (1 << purple);
 
 float posMod (float a, float n)
 {
@@ -169,7 +172,7 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
         c.x = (static_cast<float> (i) + 0.5f) * span / static_cast<float> (numCars);
     }
 
-    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
+    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden));
     place();
     setOpaque (true);
     setSize (width, height);
@@ -222,12 +225,12 @@ void RoadView::drawThumbnail (juce::Graphics& g, int car, juce::Rectangle<float>
 
 bool RoadView::isHidden (int car) const
 {
-    return (static_cast<int> (apvts.state.getProperty (hiddenId, 0)) >> car) & 1;
+    return (static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden)) >> car) & 1;
 }
 
 void RoadView::setHidden (int car, bool hide)
 {
-    const int mask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
+    const int mask = static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden));
     hiddenMask = hide ? mask | (1 << car) : mask & ~(1 << car);
     apvts.state.setProperty (hiddenId, hiddenMask, nullptr);
     // Скрытый рабочий эффект выключается, вернувшийся из гаража — включается, если был включён до скрытия.
@@ -376,7 +379,7 @@ void RoadView::advance (float dt)
     time += dt;
 
     // Маска могла смениться из пресета.
-    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
+    hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden));
     if (selected >= 0 && hidden (selected))
         select (-1);
 
