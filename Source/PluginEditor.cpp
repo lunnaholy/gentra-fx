@@ -9,19 +9,26 @@ juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 constexpr double minScale = 0.6, maxScale = 2.0;
 const juce::String uiScaleKey { "uiScale" };
 
-// Доп. параметры машины во всплывающей коробке (главная ручка и Mix — на колёсах).
+// Доп. параметры машины во всплывающей коробке (главная ручка и Mix — на колёсах). id nullptr — строки нет.
 struct Extra
 {
-    const char* id;
-    const char* label;
-    const char* unit;
-    int decimals;
+    const char* id = nullptr;
+    const char* label = "";
+    const char* unit = "";
+    int decimals = 0;
+    bool sign = false; // «+» у положительных (параметр от минуса до плюса)
 };
-const std::array<std::array<Extra, 2>, RoadView::numWorking> extras { {
-    { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 } } },
-    { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 } } },
-    { { { "distTone", "Тон", "%", 0 }, { nullptr, "", "", 0 } } }, // id nullptr — строки нет
-} };
+// Номера машин — как в RoadView (порядок прототипа): 0 чёрная, 1 ржавая, 2 красная, 8 серебряная, 11 белая.
+const std::array<std::array<Extra, 2>, RoadView::numCars> extras = []
+{
+    std::array<std::array<Extra, 2>, RoadView::numCars> e {};
+    e[0] = { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 } } };
+    e[1] = { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 } } };
+    e[2] = { { { "distTone", "Тон", "%", 0 }, {} } };
+    e[8] = { { { "delayFeedback", "Повторы", "%", 0 }, { "delayTone", "Тон", "%", 0 } } };
+    e[11] = { { { "eqLow", "Низ", "дБ", 1, true }, { "eqHigh", "Верх", "дБ", 1, true } } };
+    return e;
+}();
 
 // Картинка с неизменными углами: srcCorner пикселей картинки ложатся в dstCorner пикселей окна.
 void drawNine (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> r, int srcCorner, float dstCorner)
@@ -61,6 +68,11 @@ void BoxLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const ju
 {
     g.setOpacity (1.0f);
     drawNine (g, panel, b.getLocalBounds().toFloat(), 70, 14.0f);
+    if (b.getToggleState()) // включённая табличка — подсвечена, как дуга ручки
+    {
+        g.setColour (juce::Colour (0xffe8a23a).withAlpha (0.55f));
+        g.fillRoundedRectangle (b.getLocalBounds().toFloat().reduced (3.0f), 4.0f);
+    }
     if (over || down)
     {
         g.setColour (juce::Colours::black.withAlpha (down ? 0.25f : 0.12f));
@@ -98,7 +110,7 @@ int BoxLook::getSliderThumbRadius (juce::Slider&)
 }
 
 void BoxLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float, float,
-                                juce::Slider::SliderStyle, juce::Slider&)
+                                juce::Slider::SliderStyle, juce::Slider& slider)
 {
     // x..x+width — ход центра ручки; паз шире на полручки с каждой стороны.
     const float cy = static_cast<float> (y) + static_cast<float> (height) * 0.5f;
@@ -108,7 +120,10 @@ void BoxLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int 
     g.drawImage (track, groove);
     {
         juce::Graphics::ScopedSaveState s (g);
-        g.reduceClipRegion (groove.withRight (sliderPos).getSmallestIntegerContainer());
+        // От минуса до плюса — светится от середины (ноль) до ручки, иначе — от начала.
+        const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+        const float from = bipolar ? static_cast<float> (slider.getPositionOfValue (0.0)) : groove.getX();
+        g.reduceClipRegion (groove.withLeft (juce::jmin (from, sliderPos)).withRight (juce::jmax (from, sliderPos)).getSmallestIntegerContainer());
         g.drawImage (fill, groove);
     }
     const float tw = 2.0f * thumbHalf, th = tw * static_cast<float> (thumb.getHeight()) / static_cast<float> (thumb.getWidth());
@@ -144,6 +159,14 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     closeButton.onClick = [this] { road.select (-1); };
     popup.addAndMakeVisible (onButton);
     popup.addAndMakeVisible (closeButton);
+
+    // «По такту» (дилей): металлическая табличка, включённая подсвечена.
+    syncButton.setButtonText (ru ("По такту"));
+    syncButton.setClickingTogglesState (true);
+    syncButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    syncButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    syncButton.setTitle (ru ("Дилей по темпу DAW"));
+    popup.addChildComponent (syncButton);
 
     for (auto& row : rows)
     {
@@ -250,6 +273,7 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     const int h = 58 + numRows * 24;
     popup.setBounds ((RoadView::width - 380) / 2, RoadView::height - 8 - h, 380, h);
     onButton.setBounds (34, 12, 151, 30);
+    syncButton.setBounds (196, 13, 104, 28);
     closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
     for (int i = 0; i < static_cast<int> (rows.size()); ++i)
     {
@@ -271,6 +295,7 @@ void GentraAudioProcessorEditor::showGarage (bool show)
 void GentraAudioProcessorEditor::showPopup (int car)
 {
     onAttachment.reset();
+    syncAttachment.reset();
     for (auto& row : rows)
         row.attachment.reset();
 
@@ -282,8 +307,11 @@ void GentraAudioProcessorEditor::showPopup (int car)
     placePopup (static_cast<int> (std::count_if (carExtras.begin(), carExtras.end(), [] (const Extra& e) { return e.id != nullptr; })));
 
     auto& apvts = gentraProcessor.apvts;
-    onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-        apvts, RoadView::working[static_cast<size_t> (car)].on, onButton);
+    const auto& info = RoadView::working[static_cast<size_t> (car)];
+    onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, info.on, onButton);
+    syncButton.setVisible (info.sync != nullptr);
+    if (info.sync != nullptr)
+        syncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, info.sync, syncButton);
 
     for (size_t i = 0; i < rows.size(); ++i)
     {
@@ -296,7 +324,12 @@ void GentraAudioProcessorEditor::showPopup (int car)
         row.label.setText (ru (extra.label), juce::dontSendNotification);
         row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, extra.id, row.slider);
         // Attachment ставит свой форматтер — подменяем на русские единицы.
-        row.slider.textFromValueFunction = [extra] (double v) { return juce::String (v, extra.decimals) + " " + ru (extra.unit); };
+        row.slider.textFromValueFunction = [extra] (double v)
+        {
+            if (std::abs (v) < 0.05)
+                v = 0.0; // без «-0.0»
+            return (extra.sign && v > 0.0 ? "+" : "") + juce::String (v, extra.decimals) + " " + ru (extra.unit);
+        };
         row.slider.setTitle (ru (extra.label));
         row.slider.updateText();
     }

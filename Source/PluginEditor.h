@@ -77,6 +77,8 @@ private:
 
     Box popup;
     juce::ImageButton onButton, closeButton;
+    juce::TextButton syncButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
     std::array<Row, 2> rows;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 

@@ -1,6 +1,7 @@
 #include "RoadView.h"
 
 #include "BinaryData.h"
+#include "Dsp.h"
 
 namespace
 {
@@ -131,11 +132,16 @@ juce::Colour rgba (int r, int gr, int b, float a)
 juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
 }
 
-const std::array<RoadView::Working, RoadView::numWorking> RoadView::working { {
-    { "bass", "САБ", "bassMix", "bassOn" },
-    { "lores", "LO-RES", "loresMix", "loresOn" },
-    { "drive", "ДРАЙВ", "distMix", "distOn" },
-} };
+const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
+{
+    std::array<Working, numCars> w {};
+    w[black] = { "bass", "САБ", "%", 0, false, "bassMix", "bassOn" };
+    w[rustCar] = { "lores", "LO-RES", "%", 0, false, "loresMix", "loresOn" };
+    w[red] = { "drive", "ДРАЙВ", "%", 0, false, "distMix", "distOn" };
+    w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
+    w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync" };
+    return w;
+}();
 
 juce::Image RoadView::image (const char* name)
 {
@@ -190,7 +196,7 @@ float RoadView::param (const char* id) const
 
 bool RoadView::isOn (int car) const
 {
-    return car < numWorking ? param (working[static_cast<size_t> (car)].on) > 0.5f
+    return isWorking (car) ? param (working[static_cast<size_t> (car)].on) > 0.5f
                             : carInfo[static_cast<size_t> (car)].on;
 }
 
@@ -204,6 +210,11 @@ float RoadView::strength (int car) const
         return param ("lores") * 0.01f * param ("loresMix") * 0.01f;
     if (car == red)
         return param ("drive") * 0.01f * param ("distMix") * 0.01f;
+    if (car == white) // насколько далеко от нуля самая выкрученная ручка
+        return juce::jmax (std::abs (param ("eqVolume")), std::abs (param ("eqLow")), std::abs (param ("eqHigh"))) / 12.0f
+               * param ("eqMix") * 0.01f;
+    if (car == silver)
+        return param ("delayMix") * 0.01f * (0.5f + 0.5f * param ("delayFeedback") / 90.0f);
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -237,7 +248,7 @@ void RoadView::setHidden (int car, bool hide)
     hiddenMask = hide ? mask | (1 << car) : mask & ~(1 << car);
     apvts.state.setProperty (hiddenId, hiddenMask, nullptr);
     // Скрытый рабочий эффект выключается, вернувшийся из гаража — включается, если был включён до скрытия.
-    if (car < numWorking)
+    if (isWorking (car))
         if (auto* on = apvts.getParameter (working[static_cast<size_t> (car)].on))
         {
             const int offMask = static_cast<int> (apvts.state.getProperty (hiddenOffId, 0));
@@ -614,7 +625,7 @@ juce::RangedAudioParameter* RoadView::knobParam (int w) const
 void RoadView::mouseMove (const juce::MouseEvent& e)
 {
     hovered = carAt (e.position);
-    const bool clickable = wheelAt (e.position) >= 0 || (hovered >= 0 && hovered < numWorking);
+    const bool clickable = wheelAt (e.position) >= 0 || isWorking (hovered);
     setMouseCursor (clickable ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 }
 
@@ -635,7 +646,7 @@ void RoadView::mouseDown (const juce::MouseEvent& e)
     }
 
     const int car = carAt (e.position);
-    if (car >= 0 && car < numWorking)
+    if (isWorking (car))
         select (car);
     else if (car < 0)
         select (-1);
@@ -793,11 +804,16 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.setColour (rgba (120, 170, 255, 0.75f));
         g.strokePath (p, juce::PathStrokeType (0.012f));
     }
-    else if (i == silver)
+    else if (i == silver && on)
     {
-        for (int n = 3; n >= 1; --n)
-            drawInCarUnits (g, body, juce::jmin (0.5f, 0.4f * 0.3f * 0.75f / static_cast<float> (n)),
-                            juce::AffineTransform::translation (-static_cast<float> (n) * 0.16f * 0.8f, 0.0f));
+        // Повторы: копии сзади — шаг от времени, число и затухание от повторов, прозрачность от Mix.
+        const float spacing = 0.1f + 0.35f * (param ("delayTime") - 60.0f) / 540.0f;
+        const float feedback = param ("delayFeedback") * 0.01f;
+        const float mix = param ("delayMix") * 0.01f;
+        const int copies = 1 + juce::roundToInt (feedback * 4.0f);
+        for (int n = copies; n >= 1; --n)
+            drawInCarUnits (g, body, 0.55f * mix * std::pow (juce::jmax (feedback, 0.3f), static_cast<float> (n - 1)),
+                            juce::AffineTransform::translation (-static_cast<float> (n) * spacing, 0.0f));
     }
     else if (i == purple)
     {
@@ -821,7 +837,9 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
 
     // Свет фар на асфальте
     {
-        juce::ColourGradient beam (rgba (255, 240, 190, i == white && on ? 0.3f : 0.16f), 0.95f, 0.0f,
+        // Белая включена — фары ярче, и чем сильнее эквалайзер, тем ярче.
+        const float beamAlpha = i == white && on ? 0.3f + 0.25f * strength (white) : 0.16f;
+        juce::ColourGradient beam (rgba (255, 240, 190, beamAlpha), 0.95f, 0.0f,
                                    rgba (255, 240, 190, 0.0f), 1.6f, 0.0f, false);
         g.setGradientFill (beam);
         juce::Path p;
@@ -867,12 +885,12 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
 
             if (knobs)
             {
-                const auto arc = [&] (float amount, juce::Colour colour)
+                const auto arc = [&] (float from, float to, juce::Colour colour)
                 {
                     juce::Path p;
                     for (int n = 0; n <= 24; ++n)
                     {
-                        const float a = (-135.0f + 270.0f * amount * static_cast<float> (n) / 24.0f) * pi / 180.0f;
+                        const float a = (-135.0f + 270.0f * (from + (to - from) * static_cast<float> (n) / 24.0f)) * pi / 180.0f;
                         const juce::Point<float> pt (wx + 0.1f * std::sin (a), wheelY + 0.1f * std::cos (a));
                         if (n == 0) p.startNewSubPath (pt);
                         else p.lineTo (pt);
@@ -880,9 +898,11 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
                     g.setColour (colour);
                     g.strokePath (p, juce::PathStrokeType (0.016f));
                 };
-                arc (1.0f, rgba (232, 162, 58, 0.3f));
-                if (knob[w] > 0.004f)
-                    arc (knob[w], juce::Colour (0xffe8a23a));
+                arc (0.0f, 1.0f, rgba (232, 162, 58, 0.3f));
+                // Ручка от минуса до плюса светится от середины (ноль), обычная — от начала.
+                const float zero = w == 0 && working[static_cast<size_t> (i)].bipolar ? 0.5f : 0.0f;
+                if (std::abs (knob[w] - zero) > 0.004f)
+                    arc (zero, knob[w], juce::Colour (0xffe8a23a));
             }
         }
     }
@@ -893,7 +913,7 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.setGradientFill (juce::ColourGradient (colour, x, y, colour.withAlpha (0.0f), x + r, y, true));
         g.fillEllipse (x - r, y - r, 2.0f * r, 2.0f * r);
     };
-    glow (0.934f, 0.185f, 0.09f, rgba (255, 240, 180, 0.55f));
+    glow (0.934f, 0.185f, i == white && on ? 0.12f + 0.06f * strength (white) : 0.09f, rgba (255, 240, 180, 0.55f));
     glow (0.05f, 0.227f, 0.06f, rgba (255, 40, 40, 0.5f));
 
     // Ждёт, пока уступят, — стробит дальним: чистый белый, огромный ореол и луч.
@@ -940,7 +960,7 @@ void RoadView::drawOverlays (juce::Graphics& g) const
     {
         const auto& c = cars[static_cast<size_t> (tagCar)];
         auto text = effectName (tagCar);
-        if (tagCar >= numWorking)
+        if (! isWorking (tagCar))
             text << ru (" · скоро");
 
         const auto f = font (17.0f);
@@ -973,8 +993,18 @@ void RoadView::drawOverlays (juce::Graphics& g) const
             const auto centre = wheelCentre (w);
             const float y = centre.y + wheelHitRadius();
             const auto* p = knobParam (w);
-            const auto label = w == 0 ? ru (working[static_cast<size_t> (selected)].mainLabel) : juce::String ("MIX");
-            const auto value = juce::String (juce::roundToInt (p->convertFrom0to1 (p->getValue()))) + " %";
+            const auto& info = working[static_cast<size_t> (selected)];
+            const auto label = w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
+            float v = p->convertFrom0to1 (p->getValue());
+            if (std::abs (v) < 0.05f)
+                v = 0.0f; // без «-0.0»
+            juce::String value;
+            if (w == 0 && info.sync != nullptr && param (info.sync) > 0.5f)
+                value = gentra::delayDivisionNames[static_cast<size_t> (gentra::delayDivision (p->getValue()))];
+            else if (w == 0)
+                value = (info.bipolar && v > 0.0f ? "+" : "") + juce::String (v, info.mainDecimals) + " " + ru (info.mainUnit);
+            else
+                value = juce::String (juce::roundToInt (v)) + " %";
 
             const auto line = [&] (const juce::String& text, const juce::Font& font, juce::Colour colour, float top)
             {

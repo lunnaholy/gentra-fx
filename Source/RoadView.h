@@ -5,24 +5,29 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-// Дорога с машинами — порт HTML-прототипа. Машины 0 (чёрная), 1 (ржавая) и 2 (красная) — рабочие эффекты:
+// Дорога с машинами — порт HTML-прототипа. Рабочие эффекты — машины из RoadView::working:
 // клик по машине приближает камеру, и её колёса становятся ручками. Остальные едут декоративным потоком.
 class RoadView final : public juce::Component,
                        private juce::Timer
 {
 public:
     static constexpr int numCars = 12;
-    static constexpr int numWorking = 3;
     static constexpr int width = 900, height = 560;
 
+    // Рабочая машина — эффект; у декоративной main == nullptr. Индекс — номер машины (как в маске гаража).
     struct Working
     {
-        const char* main;      // параметр заднего колеса
-        const char* mainLabel; // подпись под ним, заглавными: JUCE не меняет регистр кириллицы
-        const char* mix;       // параметр переднего колеса
-        const char* on;        // вкл/выкл
+        const char* main = nullptr;  // параметр заднего колеса
+        const char* mainLabel = "";  // подпись под ним, заглавными: JUCE не меняет регистр кириллицы
+        const char* mainUnit = "%";  // единица значения под колесом
+        int mainDecimals = 0;
+        bool bipolar = false;        // ручка от минуса до плюса: дуга и подпись — от середины, со знаком
+        const char* mix = nullptr;   // параметр переднего колеса
+        const char* on = nullptr;    // вкл/выкл
+        const char* sync = nullptr;  // «по такту»: тумблер в табличке; включён — под колесом доля такта (Dsp.h)
     };
-    static const std::array<Working, numWorking> working;
+    static const std::array<Working, numCars> working;
+    static bool isWorking (int car) { return car >= 0 && working[static_cast<size_t> (car)].main != nullptr; }
 
     static juce::String effectName (int car);
     static juce::Colour bodyColour (int car);
