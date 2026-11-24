@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <vector>
 
 // DSP без зависимости от JUCE. Все amount — в диапазоне 0..1.
 namespace gentra
@@ -20,7 +21,25 @@ constexpr double loresMaxBits  = 16.0;    // битность при 0%
 constexpr double driveMaxDb    = 36.0;    // предусиление дисторшна при 100%
 constexpr double driveRefLevel = 0.25;    // синус этой амплитуды выходит с тем же пиком при любом драйве
 constexpr double toneDarkHz    = 800.0;   // срез тона при 0%
-constexpr double toneBrightHz  = 16000.0; // срез тона при 100%
+constexpr double toneBrightHz  = 16000.0; // срез тона при 100% (дисторшн и дилей)
+constexpr double eqLowHz       = 200.0;   // шельф «Низ» эквалайзера
+constexpr double eqHighHz      = 4000.0;  // шельф «Верх» эквалайзера
+constexpr double delayMaxSeconds = 4.0;   // длина линии дилея: 1/2 при 30 BPM
+constexpr double delayGlideTau = 0.05;    // постоянная плавной смены времени дилея, с (заметная езда ~0.2 с)
+
+// Доли такта для дилея по темпу, в четвертях: ручка времени выбирает одну из них.
+constexpr int numDelayDivisions = 13;
+constexpr std::array<double, numDelayDivisions> delayDivisionBeats {
+    0.125, 1.0 / 6.0, 0.1875, 0.25, 1.0 / 3.0, 0.375, 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0
+};
+constexpr std::array<const char*, numDelayDivisions> delayDivisionNames {
+    "1/32", "1/16T", "1/32.", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "1/2T", "1/4.", "1/2"
+};
+// normalised — положение ручки времени 0..1.
+inline int delayDivision (float normalised) noexcept
+{
+    return std::clamp (static_cast<int> (std::lround (normalised * (numDelayDivisions - 1))), 0, numDelayDivisions - 1);
+}
 
 constexpr double pi = 3.14159265358979323846;
 
@@ -71,6 +90,21 @@ struct Biquad
         b2 = A * ((A + 1.0) - (A - 1.0) * cosw - k) / a0;
         a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cosw) / a0;
         a2 = ((A + 1.0) + (A - 1.0) * cosw - k) / a0;
+    }
+
+    void setHighShelf (double fs, double freq, double q, double gainDb) noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0);
+        const double w0 = 2.0 * pi * freq / fs;
+        const double cosw = std::cos (w0);
+        const double k = 2.0 * std::sqrt (A) * std::sin (w0) / (2.0 * q);
+        const double a0 = (A + 1.0) - (A - 1.0) * cosw + k;
+
+        b0 = A * ((A + 1.0) + (A - 1.0) * cosw + k) / a0;
+        b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cosw) / a0;
+        b2 = A * ((A + 1.0) + (A - 1.0) * cosw - k) / a0;
+        a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cosw) / a0;
+        a2 = ((A + 1.0) - (A - 1.0) * cosw - k) / a0;
     }
 
     void setLowPass (double fs, double freq, double q) noexcept
@@ -250,6 +284,161 @@ private:
     Biquad tone;
     float gain = 1.0f, comp = 1.0f;
     std::array<float, 2> last {};
+    int countdown = 0;
+};
+
+inline double toneHz (float toneAmount) noexcept
+{
+    return toneDarkHz * std::pow (toneBrightHz / toneDarkHz, static_cast<double> (toneAmount));
+}
+
+// Белая машина: шельфы «Низ» и «Верх», затем громкость. Все параметры — в дБ.
+class Equalizer
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        fs = sampleRate;
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        low.reset();
+        high.reset();
+        last = { 1.0e9f, 1.0e9f, 1.0e9f };
+        countdown = 0;
+    }
+
+    // Раз в сэмпл-фрейм; шельфы пересчитываются не чаще раза в 16 сэмплов, громкость — сразу.
+    void setParams (float volumeDb, float lowDb, float highDb) noexcept
+    {
+        if (changed (volumeDb, last[0]))
+        {
+            last[0] = volumeDb;
+            gain = static_cast<float> (std::pow (10.0, static_cast<double> (volumeDb) / 20.0));
+        }
+
+        if (countdown > 0)
+            --countdown;
+
+        if (countdown == 0 && (changed (lowDb, last[1]) || changed (highDb, last[2])))
+        {
+            last[1] = lowDb;
+            last[2] = highDb;
+            low.setLowShelf (fs, eqLowHz, 0.707, lowDb);
+            high.setHighShelf (fs, eqHighHz, 0.707, highDb);
+            countdown = 16;
+        }
+    }
+
+    float processSample (int channel, float x) noexcept
+    {
+        return gain * static_cast<float> (high.process (channel, low.process (channel, x)));
+    }
+
+private:
+    double fs = 44100.0;
+    Biquad low, high;
+    float gain = 1.0f;
+    std::array<float, 3> last {};
+    int countdown = 0;
+};
+
+// Серебряная машина: линия задержки с обратной связью, в петле — lowpass «тон».
+// Смена времени — не скачком, а ездой головки чтения (как у ленты): два сглаживания подряд, поэтому
+// плавны и положение, и скорость головки — ни щелчка, ни излома на старте и финише.
+// Пока машина выключена, линия всё равно пишет вход (feed): включился — сразу слышны повторы недавнего.
+class Delay
+{
+public:
+    // Единственное место, где выделяется память, — до запуска звука.
+    void prepare (double sampleRate)
+    {
+        fs = sampleRate;
+        size = static_cast<int> (std::ceil (delayMaxSeconds * fs)) + 8;
+        glide = 1.0 - std::exp (-1.0 / (delayGlideTau * fs));
+        for (auto& l : line)
+            l.assign (static_cast<size_t> (size), 0.0f);
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        for (auto& l : line)
+            std::fill (l.begin(), l.end(), 0.0f);
+        write = 0;
+        delay = pull = -1.0;
+        tone.reset();
+        lastTone = -1.0f;
+        countdown = 0;
+    }
+
+    // Раз в сэмпл-фрейм: время в секундах, повторы 0..1, тон 0..1.
+    void setParams (double seconds, float feedbackAmount, float toneAmount) noexcept
+    {
+        // Цель — целое число сэмплов: доехав, головка читает без интерполяции и не мылит повторы.
+        const double target = std::clamp (std::round (seconds * fs), 4.0, static_cast<double> (size - 4));
+        if (delay < 0.0)
+            delay = pull = target;
+        pull += (target - pull) * glide;
+        delay += (pull - delay) * glide;
+        if (std::abs (target - pull) < 1.0e-3 && std::abs (target - delay) < 1.0e-3)
+            delay = pull = target; // доехали: скорость уже ~0, дальше — целое число сэмплов
+
+        feedback = feedbackAmount;
+        if (countdown > 0)
+            --countdown;
+        if (countdown == 0 && changed (toneAmount, lastTone))
+        {
+            lastTone = toneAmount;
+            tone.setLowPass (fs, toneHz (toneAmount), 0.707);
+            countdown = 16;
+        }
+    }
+
+    // Возвращает повтор и пишет в линию вход плюс отфильтрованную обратную связь.
+    float processSample (int channel, float x) noexcept
+    {
+        const float y = read (channel);
+        line[static_cast<size_t> (channel)][static_cast<size_t> (write)] = x + feedback * static_cast<float> (tone.process (channel, y));
+        return y;
+    }
+
+    void feed (int channel, float x) noexcept { line[static_cast<size_t> (channel)][static_cast<size_t> (write)] = x; }
+
+    // После всех каналов фрейма.
+    void advance() noexcept { write = write + 1 < size ? write + 1 : 0; }
+
+private:
+    float at (int channel, int index) const noexcept
+    {
+        return line[static_cast<size_t> (channel)][static_cast<size_t> (index < 0 ? index + size : index)];
+    }
+
+    float read (int channel) const noexcept
+    {
+        const double whole = std::floor (delay);
+        const auto frac = static_cast<float> (delay - whole);
+        const int i = write - static_cast<int> (whole);
+        if (frac <= 0.0f)
+            return at (channel, i);
+
+        // Эрмит по 4 точкам: между i (задержка whole) и i − 1 (задержка whole + 1).
+        const float xm1 = at (channel, i + 1 >= size ? i + 1 - size : i + 1), x0 = at (channel, i),
+                    x1 = at (channel, i - 1), x2 = at (channel, i - 2);
+        const float c1 = 0.5f * (x1 - xm1);
+        const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+        const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * frac + c2) * frac + c1) * frac + x0;
+    }
+
+    double fs = 44100.0;
+    std::array<std::vector<float>, maxChannels> line;
+    int size = 0, write = 0;
+    double delay = -1.0, pull = -1.0, glide = 0.0;
+    float feedback = 0.0f, lastTone = -1.0f;
+    Biquad tone;
     int countdown = 0;
 };
 } // namespace gentra

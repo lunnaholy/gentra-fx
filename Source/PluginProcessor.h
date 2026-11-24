@@ -23,7 +23,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -52,7 +52,8 @@ private:
         std::array<std::atomic<float>*, count> raw {}; // для wet — параметр Mix
         std::array<float, count> scale {};
         std::atomic<float>* on = nullptr;
-        bool extraBKeepsAlive = false; // тонировка чёрной звучит и при нулевом басе
+        int aliveMask = 0; // какие из main/extraA/extraB, отличные от нуля, значат «есть эффект»; 0 — есть всегда
+        static constexpr int keep (int index) { return 1 << index; }
         std::array<juce::SmoothedValue<float>, count> value;
 
         float target (int i) const noexcept;
@@ -65,12 +66,18 @@ private:
     };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
-    Stage makeStage (const char* mainId, const char* aId, float aScale, const char* bId, float bScale,
-                     const char* mixId, const char* onId, bool bKeepsAlive);
+    Stage makeStage (const char* mainId, float mainScale, const char* aId, float aScale, const char* bId, float bScale,
+                     const char* mixId, const char* onId, int aliveMask);
 
     void processDrive (juce::AudioBuffer<float>&, int numChannels) noexcept;
+    void processEqAndDelay (juce::AudioBuffer<float>&, int numChannels) noexcept;
 
-    Stage black, rust, red;
+    Stage black, rust, red, white, silver;
+    std::atomic<float>* delaySync;
+    juce::RangedAudioParameter* delayTimeParam;
+    std::atomic<double> hostBpm { 120.0 }; // последний темп хоста; без хоста — 120
+    gentra::Equalizer eq;
+    gentra::Delay delay;
     gentra::BassBoost bass;
     gentra::LoRes lores;
     gentra::Drive drive;

@@ -41,16 +41,19 @@ void GentraAudioProcessor::Stage::skip (int numSamples) noexcept
         v.skip (numSamples);
 }
 
-// Машина простаивает, когда звучать нечему (главная ручка в нуле) или нечем (wet в нуле) и ничего не едет.
-// Простаивающая стадия не трогает буфер — отсюда bit-perfect при 0%.
+// Машина простаивает, когда звучать нечему (параметры из aliveMask в нуле) или нечем (wet в нуле) и ничего не едет.
+// Простаивающая стадия не трогает буфер — отсюда bit-perfect при 0%. Пустая aliveMask — звучит всегда (дилей).
 bool GentraAudioProcessor::Stage::active() const noexcept
 {
-    if (value[main].isSmoothing() || value[wet].isSmoothing() || (extraBKeepsAlive && value[extraB].isSmoothing()))
-        return true;
-
-    const bool hasEffect = value[main].getTargetValue() > 0.0f
-                           || (extraBKeepsAlive && value[extraB].getTargetValue() > 0.0f);
-    return hasEffect && value[wet].getTargetValue() > 0.0f;
+    bool hasEffect = aliveMask == 0;
+    for (int i : { main, extraA, extraB })
+        if ((aliveMask >> i) & 1)
+        {
+            if (value[static_cast<size_t> (i)].isSmoothing())
+                return true;
+            hasEffect = hasEffect || std::abs (value[static_cast<size_t> (i)].getTargetValue()) > 0.0f;
+        }
+    return value[wet].isSmoothing() || (hasEffect && value[wet].getTargetValue() > 0.0f);
 }
 
 // ---------------- Processor ----------------
@@ -60,22 +63,27 @@ GentraAudioProcessor::GentraAudioProcessor()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout()),
-      black (makeStage ("bass", "bassFreq", 1.0f, "tint", 0.01f, "bassMix", "bassOn", true)),
-      rust (makeStage ("lores", "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", false)),
-      red (makeStage ("drive", "distTone", 0.01f, nullptr, 0.0f, "distMix", "distOn", false))
+      black (makeStage ("bass", 0.01f, "bassFreq", 1.0f, "tint", 0.01f, "bassMix", "bassOn", Stage::keep (Stage::main) | Stage::keep (Stage::extraB))),
+      rust (makeStage ("lores", 0.01f, "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", Stage::keep (Stage::main))),
+      red (makeStage ("drive", 0.01f, "distTone", 0.01f, nullptr, 0.0f, "distMix", "distOn", Stage::keep (Stage::main))),
+      white (makeStage ("eqVolume", 1.0f, "eqLow", 1.0f, "eqHigh", 1.0f, "eqMix", "eqOn",
+                        Stage::keep (Stage::main) | Stage::keep (Stage::extraA) | Stage::keep (Stage::extraB))),
+      silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
+      delaySync (apvts.getRawParameterValue ("delaySync")),
+      delayTimeParam (apvts.getParameter ("delayTime"))
 {
 }
 
-GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId, const char* aId, float aScale,
+GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId, float mainScale, const char* aId, float aScale,
                                                              const char* bId, float bScale,
-                                                             const char* mixId, const char* onId, bool bKeepsAlive)
+                                                             const char* mixId, const char* onId, int aliveMask)
 {
     Stage s;
     s.raw = { apvts.getRawParameterValue (mainId), apvts.getRawParameterValue (aId),
               bId != nullptr ? apvts.getRawParameterValue (bId) : nullptr, apvts.getRawParameterValue (mixId) };
-    s.scale = { 0.01f, aScale, bScale, 0.01f };
+    s.scale = { mainScale, aScale, bScale, 0.01f };
     s.on = apvts.getRawParameterValue (onId);
-    s.extraBKeepsAlive = bKeepsAlive;
+    s.aliveMask = aliveMask;
     return s;
 }
 
@@ -90,8 +98,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::NormalisableRange<float> rate (0.5f, 12.0f, 0.01f);
     rate.setSkewForCentre (3.0f);
 
-    // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом, 3 — красная машина.
-    return {
+    // Шаг 0.1 дБ, но округление своё: штатное (−12 + 120·0.1) даёт вместо нуля 1.8e-7, и эквалайзер не простаивал бы.
+    juce::NormalisableRange<float> decibels (-12.0f, 12.0f,
+                                             [] (float start, float end, float t) { return start + (end - start) * t; },
+                                             [] (float start, float end, float v) { return (v - start) / (end - start); },
+                                             [] (float, float, float v) { return std::round (v * 10.0f) / 10.0f; });
+    decibels.interval = 0.1f;
+    const auto dB = Attributes().withLabel ("dB");
+
+    juce::NormalisableRange<float> delayMs (60.0f, 600.0f, 1.0f);
+    delayMs.setSkewForCentre (200.0f);
+
+    // По темпу ручка времени выбирает долю такта — и хост показывает её же, а не миллисекунды.
+    auto sync = std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delaySync", 3 }, "Delay Sync", false);
+    const auto* syncParam = sync.get();
+    auto time = std::make_unique<Float> (
+        juce::ParameterID { "delayTime", 3 }, "Delay Time", delayMs, 250.0f,
+        Attributes().withStringFromValueFunction ([syncParam, delayMs] (float ms, int)
+        {
+            if (syncParam->get())
+                return juce::String (gentra::delayDivisionNames[static_cast<size_t> (gentra::delayDivision (delayMs.convertTo0to1 (ms)))]);
+            return juce::String (juce::roundToInt (ms)) + " ms";
+        }));
+
+    // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом,
+    // 3 — красная, белая и серебряная машины.
+    juce::AudioProcessorValueTreeState::ParameterLayout layout {
         std::make_unique<Float> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "bassFreq", 2 }, "Bass Freq",
                                  juce::NormalisableRange<float> (40.0f, 150.0f, 1.0f), 100.0f, Attributes().withLabel ("Hz")),
@@ -109,8 +141,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "drive", 3 }, "Drive", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "distTone", 3 }, "Drive Tone", percent, 50.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "distMix", 3 }, "Drive Mix", percent, 45.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "distOn", 3 }, "Drive On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "distOn", 3 }, "Drive On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "eqVolume", 3 }, "EQ Volume", decibels, 0.0f, dB),
+        std::make_unique<Float> (juce::ParameterID { "eqLow", 3 }, "EQ Low", decibels, 0.0f, dB),
+        std::make_unique<Float> (juce::ParameterID { "eqHigh", 3 }, "EQ High", decibels, 0.0f, dB),
+        std::make_unique<Float> (juce::ParameterID { "eqMix", 3 }, "EQ Mix", percent, 100.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "eqOn", 3 }, "EQ On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "delayFeedback", 3 }, "Delay Feedback",
+                                 juce::NormalisableRange<float> (0.0f, 90.0f, 0.1f), 35.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "delayTone", 3 }, "Delay Tone", percent, 60.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "delayMix", 3 }, "Delay Mix", percent, 30.0f, pct),
+        // Дилей по умолчанию выключен: с Mix 30% он звучал бы сразу при вставке плагина.
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delayOn", 3 }, "Delay On", false)
     };
+    layout.add (std::move (time), std::move (sync));
+    return layout;
 }
 
 void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
@@ -126,6 +173,10 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     drive.prepare (2.0 * sampleRate);
     driveEngaged.reset (sampleRate, 0.01);
     driveEngaged.setCurrentAndTargetValue (0.0f);
+    white.prepare (sampleRate);
+    silver.prepare (sampleRate);
+    eq.prepare (sampleRate);
+    delay.prepare (sampleRate);
 }
 
 void GentraAudioProcessor::reset()
@@ -135,10 +186,14 @@ void GentraAudioProcessor::reset()
     oversampling.reset();
     drive.reset();
     driveEngaged.setCurrentAndTargetValue (0.0f);
+    eq.reset();
+    delay.reset();
     meterLp = 0.0f;
     black.snap();
     rust.snap();
     red.snap();
+    white.snap();
+    silver.snap();
 }
 
 bool GentraAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -216,6 +271,8 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     else
         red.skip (numSamples);
 
+    processEqAndDelay (buffer, numChannels);
+
     // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
     if (numChannels > 0)
     {
@@ -231,7 +288,7 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 }
 
-// Последняя в цепочке, поэтому блоком, а не в общем цикле по сэмплам: оверсэмплинг работает кусками.
+// Блоком, а не в общем цикле по сэмплам: оверсэмплинг работает кусками.
 // В обходе через фильтры оверсэмплинга идёт копия входа, а буфер остаётся нетронутым (bit-perfect).
 void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
 {
@@ -291,12 +348,85 @@ void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int n
     }
 }
 
+// Белая и серебряная — после красной: эквалайзер, затем дилей.
+void GentraAudioProcessor::processEqAndDelay (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    auto* const* data = buffer.getArrayOfWritePointers();
+
+    white.updateTargets();
+    silver.updateTargets();
+    const bool eqOn = white.active();
+    const bool delayOn = silver.active();
+    if (! eqOn)
+    {
+        eq.reset();
+        white.skip (numSamples);
+    }
+
+    // По темпу — доля такта по положению ручки; время ручки (мс) тогда не нужно.
+    const bool sync = delaySync->load() > 0.5f;
+    const double syncSeconds = gentra::delayDivisionBeats[static_cast<size_t> (gentra::delayDivision (delayTimeParam->getValue()))]
+                               * 60.0 / hostBpm.load (std::memory_order_relaxed);
+
+    for (int n = 0; n < numSamples; ++n)
+    {
+        if (eqOn)
+        {
+            const float volume = white.next (Stage::main);
+            const float low = white.next (Stage::extraA);
+            const float high = white.next (Stage::extraB);
+            const float wet = white.next (Stage::wet);
+            eq.setParams (volume, low, high);
+
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                const float x = data[ch][n];
+                data[ch][n] = wet * eq.processSample (ch, x) + (1.0f - wet) * x;
+            }
+        }
+
+        const float time = silver.next (Stage::main);
+        const float feedback = silver.next (Stage::extraA);
+        const float tone = silver.next (Stage::extraB);
+        const float wet = silver.next (Stage::wet);
+        delay.setParams (sync ? syncSeconds : static_cast<double> (time), feedback, tone);
+
+        // Выключенный дилей не трогает буфер, но линия пишет вход: включили — повторы уже есть.
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float x = data[ch][n];
+            if (delayOn)
+                data[ch][n] = wet * delay.processSample (ch, x) + (1.0f - wet) * x;
+            else
+                delay.feed (ch, x);
+        }
+        delay.advance();
+    }
+}
+
+double GentraAudioProcessor::getTailLengthSeconds() const
+{
+    // Хвост дилея: пока повторы не затихнут до −60 дБ.
+    if (apvts.getRawParameterValue ("delayOn")->load() < 0.5f || apvts.getRawParameterValue ("delayMix")->load() <= 0.0f)
+        return 0.0;
+    const double seconds = delaySync->load() > 0.5f
+                               ? gentra::delayDivisionBeats[static_cast<size_t> (gentra::delayDivision (delayTimeParam->getValue()))]
+                                     * 60.0 / hostBpm.load (std::memory_order_relaxed)
+                               : apvts.getRawParameterValue ("delayTime")->load() * 0.001;
+    const double feedback = apvts.getRawParameterValue ("delayFeedback")->load() * 0.01;
+    const double repeats = feedback > 0.0 ? std::log (0.001) / std::log (feedback) : 0.0;
+    return juce::jmin (gentra::delayMaxSeconds, seconds) * (1.0 + repeats);
+}
+
 void GentraAudioProcessor::readTransport() noexcept
 {
     const auto* playHead = getPlayHead();
     const auto pos = playHead != nullptr ? playHead->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
     const auto ppq = pos ? pos->getPpqPosition() : juce::Optional<double>();
     const auto bpm = pos ? pos->getBpm() : juce::Optional<double>();
+    if (bpm && *bpm > 0.0)
+        hostBpm.store (*bpm, std::memory_order_relaxed); // темп для дилея — и когда транспорт стоит
     if (! pos || ! pos->getIsPlaying() || ! ppq || ! bpm || *bpm <= 0.0)
     {
         clockPlaying.store (false, std::memory_order_relaxed);

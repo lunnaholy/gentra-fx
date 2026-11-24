@@ -264,6 +264,194 @@ void run (double sampleRate)
     CHECK (std::abs (q.apvts.getRawParameterValue ("tint")->load()) < 0.01f);
 }
 
+// Хост с заданной позицией и темпом.
+struct FakeHead final : juce::AudioPlayHead
+{
+    juce::Optional<PositionInfo> getPosition() const override { return info; }
+    PositionInfo info;
+};
+
+// Белая: громкость и шельфы дают заявленное усиление, в нуле / Mix 0 / выкл — побитово прозрачно.
+void equalizer (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::Random rng (7);
+    juce::MidiBuffer midi;
+
+    // Усиление синуса freq в дБ при текущих настройках.
+    const auto gainAt = [&] (double freq)
+    {
+        settle (p, sampleRate, rng);
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 0.5));
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+            for (int ch = 0; ch < 2; ++ch)
+                buf.setSample (ch, n, 0.1f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * freq * n / sampleRate)));
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        return 20.0 * std::log10 (amplitudeAt (buf, freq, sampleRate) / 0.1);
+    };
+
+    setParam (p, "eqVolume", 6.0f);
+    CHECK (std::abs (gainAt (1000.0) - 6.0) < 0.1);
+    setParam (p, "eqVolume", 0.0f);
+    setParam (p, "eqLow", 12.0f);
+    const double lowBoost = gainAt (50.0), lowLeavesTop = gainAt (10000.0);
+    setParam (p, "eqLow", 0.0f);
+    setParam (p, "eqHigh", 12.0f);
+    const double highBoost = gainAt (10000.0), highLeavesBottom = gainAt (50.0);
+    setParam (p, "eqLow", -12.0f);
+    const double lowCut = gainAt (50.0);
+    std::printf ("eq %.0f Hz: low +12 -> 50 Hz %+.1f dB, 10 kHz %+.1f dB; high +12 -> 10 kHz %+.1f dB, 50 Hz %+.1f dB; low -12 -> %+.1f dB\n",
+                 sampleRate, lowBoost, lowLeavesTop, highBoost, highLeavesBottom, lowCut);
+    CHECK (lowBoost > 10.5 && std::abs (lowLeavesTop) < 0.3);
+    CHECK (highBoost > 10.5 && std::abs (highLeavesBottom) < 0.3);
+    CHECK (lowCut < -10.5);
+
+    setParam (p, "eqMix", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, "eqMix", 100.0f);
+    setParam (p, "eqOn", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, "eqOn", 1.0f);
+    setParam (p, "eqLow", 0.0f);
+    setParam (p, "eqHigh", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+}
+
+// Серебряная: повтор ровно через заданное время, обратная связь, смена времени без щелчков и изломов,
+// доля такта по темпу хоста, хвост для хоста; выключенная — побитово прозрачна.
+void delayCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::MidiBuffer midi;
+    CHECK (p.getTailLengthSeconds() <= 0.0); // по умолчанию выключен
+
+    setParam (p, "delayOn", 1.0f);
+    setParam (p, "delayMix", 100.0f);
+    setParam (p, "delayFeedback", 0.0f);
+    setParam (p, "delayTone", 100.0f);
+    setParam (p, "delayTime", 100.0f);
+
+    // Тишина seconds секунд (сглаживание доезжает, линия пустеет), затем импульс; возвращает отклик.
+    const auto impulse = [&] (double seconds)
+    {
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 1.5));
+        buf.clear();
+        p.processBlock (buf, midi);
+        juce::AudioBuffer<float> out (2, static_cast<int> (sampleRate * seconds));
+        out.clear();
+        out.setSample (0, 0, 1.0f);
+        out.setSample (1, 0, 1.0f);
+        p.processBlock (out, midi);
+        CHECK (allFinite (out));
+        return out;
+    };
+
+    // Без обратной связи: один повтор ровно через 100 мс, больше ничего (Mix 100% — сухого нет).
+    {
+        const auto out = impulse (0.3);
+        const int at = juce::roundToInt (0.1 * sampleRate);
+        CHECK (std::abs (out.getSample (0, at) - 1.0f) < 1.0e-6f);
+        float rest = 0.0f;
+        for (int n = 0; n < out.getNumSamples(); ++n)
+            if (n != at)
+                rest = juce::jmax (rest, std::abs (out.getSample (0, n)));
+        CHECK (rest < 1.0e-6f);
+    }
+
+    // Повторы 50%: второй повтор через 200 мс несёт половину энергии первого (тон открыт — фильтр её не съедает).
+    setParam (p, "delayFeedback", 50.0f);
+    {
+        const auto out = impulse (0.5);
+        const int second = juce::roundToInt (0.2 * sampleRate);
+        float sum = 0.0f;
+        for (int n = second - 20; n < second + static_cast<int> (0.01 * sampleRate); ++n)
+            sum += out.getSample (0, n);
+        CHECK (std::abs (sum - 0.5f) < 0.02f);
+        CHECK (p.getTailLengthSeconds() > 1.0); // 0.1 с × ~11 повторов до −60 дБ
+    }
+
+    // Смена времени 100 → 400 мс на синусе: вторая разность выхода как у гладкого синуса (с поправкой на высоту
+    // при езде головки), а скачок головки или излом скорости дали бы 0.14 и больше.
+    {
+        setParam (p, "delayFeedback", 0.0f);
+        juce::AudioBuffer<float> buf (2, 64);
+        long long t = 0;
+        float y1 = 0.0f, y2 = 0.0f, worst = 0.0f;
+        for (int b = 0; b < static_cast<int> (1.5 * sampleRate / 64.0); ++b)
+        {
+            if (b == static_cast<int> (0.5 * sampleRate / 64.0))
+                setParam (p, "delayTime", 400.0f);
+            for (int n = 0; n < 64; ++n)
+                for (int ch = 0; ch < 2; ++ch)
+                    buf.setSample (ch, n, 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 1000.0 * static_cast<double> (t + n) / sampleRate)));
+            t += 64;
+            p.processBlock (buf, midi);
+            for (int n = 0; n < 64; ++n)
+            {
+                const float y = buf.getSample (0, n);
+                if (b * 64 + n > static_cast<int> (0.3 * sampleRate))
+                    worst = juce::jmax (worst, std::abs (y - 2.0f * y1 + y2));
+                y2 = y1;
+                y1 = y;
+            }
+        }
+        const double smooth = 0.5 * std::pow (juce::MathConstants<double>::twoPi * 1000.0 / sampleRate, 2.0);
+        std::printf ("delay %.0f Hz: time change 2nd diff %.4f (still sine %.4f)\n", sampleRate, worst, smooth);
+        CHECK (worst < 3.0 * smooth);
+    }
+
+    // По темпу: 120 BPM, ручка на 1/4 — повтор через 0.5 с; хост видит «1/4».
+    {
+        FakeHead head;
+        head.info.setBpm (120.0); // транспорт стоит, но темп хост сообщает
+        p.setPlayHead (&head);
+        setParam (p, "delaySync", 1.0f);
+        auto* time = p.apvts.getParameter ("delayTime");
+        time->setValueNotifyingHost (9.0f / 12.0f);
+        CHECK (time->getCurrentValueAsText() == "1/4");
+        const auto out = impulse (0.7);
+        CHECK (std::abs (out.getSample (0, juce::roundToInt (0.5 * sampleRate)) - 1.0f) < 1.0e-6f);
+        p.setPlayHead (nullptr);
+    }
+
+    juce::Random rng (3);
+    setParam (p, "delayOn", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    CHECK (p.getTailLengthSeconds() <= 0.0);
+}
+
+// Случайная автоматизация белой и серебряной (вместе с остальными) и размеры блока: без NaN/Inf и разноса.
+void automation (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::Random rng (11);
+    juce::MidiBuffer midi;
+    const auto any = [&] (const char* id) { auto* q = p.apvts.getParameter (id); q->setValueNotifyingHost (rng.nextFloat()); };
+    for (int i = 0; i < 300; ++i)
+    {
+        for (auto id : { "eqVolume", "eqLow", "eqHigh", "eqMix", "delayTime", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
+            any (id);
+        setParam (p, "delayOn", rng.nextBool() ? 1.0f : 0.0f);
+        setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
+        juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
+        fillNoise (buf, rng, 1.0f);
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        CHECK (buf.getMagnitude (0, buf.getNumSamples()) < 64.0f); // +12 дБ громкости и шельфа поверх баса
+    }
+}
+
 // Щелчки красной при включении и выключении. Синус 2 кГц, блоки по 64. Мерило — вторая разность выхода:
 // у гладкого синуса она ~0.04 (0.5·(2π·2000/fs)²), скачок даёт величину порядка самого скачка.
 void driveClicks (double sampleRate)
@@ -393,11 +581,6 @@ void garage()
 }
 
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
-struct FakeHead final : juce::AudioPlayHead
-{
-    juce::Optional<PositionInfo> getPosition() const override { return info; }
-    PositionInfo info;
-};
 
 void beatSync()
 {
@@ -469,6 +652,11 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "bass", percent);
     setParam (p, "lores", percent);
     setParam (p, "drive", percent);
+    setParam (p, "eqVolume", (percent - 50.0f) * 0.24f); // −12…+12 дБ по шкале 0–100
+    setParam (p, "eqHigh", 4.5f);
+    setParam (p, "eqLow", -3.0f);
+    setParam (p, "delayOn", percent > 0.0f ? 1.0f : 0.0f);
+    setParam (p, "delayFeedback", 0.9f * percent);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
@@ -502,7 +690,12 @@ int main (int argc, char** argv)
 
     useTempSettings (1.0);
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+    {
         run (sampleRate);
+        equalizer (sampleRate);
+        delayCar (sampleRate);
+        automation (sampleRate);
+    }
     driveClicks (44100.0);
     driveClicks (96000.0);
     traffic();
