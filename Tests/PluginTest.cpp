@@ -229,15 +229,19 @@ void traffic()
         RoadView road (p.apvts, nullptr);
         road.select (car);
         float gap = 1.0e9f;
+        int flashFrames = 0;
         for (int i = 0; i < 60 * 60; ++i)
         {
             road.advance (1.0f / 60.0f);
+            flashFrames += road.flashingCars() > 0;
             if (i > 60) // первая секунда — разъезд со стартовых мест
                 gap = juce::jmin (gap, road.closestGap());
         }
         std::printf ("traffic car %d: %d lane changes, closest %.0f px\n", car, road.getLaneChanges(), gap);
         CHECK (road.getLaneChanges() >= 10);
         CHECK (gap > 100.0f);
+        std::printf ("traffic car %d: someone flashing %.0f%% of the time\n", car, 100.0 * flashFrames / 3600.0);
+        CHECK (flashFrames > 0 && flashFrames < 3600); // застревают иногда, но не всё время
     }
 }
 

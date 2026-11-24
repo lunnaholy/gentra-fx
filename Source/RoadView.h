@@ -50,6 +50,7 @@ public:
     int getLaneChanges() const noexcept { return laneChanges; }
     float closestGap() const; // минимальная дистанция между машинами в одной полосе
     float getRumble() const noexcept { return rumble; } // сила тряски в этом кадре, 0..1
+    int flashingCars() const; // сколько машин сейчас моргают дальним
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -64,6 +65,7 @@ private:
     struct Car
     {
         float x = 0.0f, lp = 0.0f, ve = 0.3f, cool = 0.0f, spin = 0.0f;
+        float waiting = 0.0f; // сколько секунд упирается в медленного и не может объехать
         float px = 0.0f, py = 0.0f, sc = 1.0f; // положение на экране без учёта камеры
         int lane = 0;
     };

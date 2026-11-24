@@ -26,6 +26,8 @@ constexpr float wheelR = 0.083f; // радиус колеса
 constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 // Под бит DAW: сколько держится уровень низа между долями, с; во сколько слабее несильные доли.
 constexpr float beatHold = 0.6f, weakBeat = 0.6f;
+// Застрявший за медленным моргает дальним: через сколько секунд ожидания и сколько вспышек в секунду.
+constexpr float flashDelay = 0.4f, flashRate = 14.0f;
 // =======================================================================
 
 constexpr float W = static_cast<float> (RoadView::width);
@@ -313,6 +315,14 @@ void RoadView::weave (int car)
     }
 }
 
+int RoadView::flashingCars() const
+{
+    int n = 0;
+    for (int i = 0; i < numCars; ++i)
+        n += ! hidden (i) && cars[static_cast<size_t> (i)].waiting > flashDelay;
+    return n;
+}
+
 float RoadView::closestGap() const
 {
     float gap = span;
@@ -363,6 +373,11 @@ void RoadView::advance (float dt)
             }
         }
         const bool close = blocker >= 0 && dist < carLen * 1.5f;
+
+        // Упёрся в медленного и не может объехать — копит «ожидание» (моргает дальним, см. drawCar).
+        const bool waiting = on && i != selected && c.lane != shoulder && close
+                             && cars[static_cast<size_t> (blocker)].ve < target - 0.02f;
+        c.waiting = waiting ? c.waiting + dt : 0.0f;
 
         if (i == selected)
         {
@@ -812,6 +827,22 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     };
     glow (0.934f, 0.185f, 0.09f, rgba (255, 240, 180, 0.55f));
     glow (0.05f, 0.227f, 0.06f, rgba (255, 40, 40, 0.5f));
+
+    // Ждёт, пока уступят, — стробит дальним: чистый белый, огромный ореол и луч.
+    if (c.waiting > flashDelay && std::fmod (time * flashRate, 1.0f) < 0.5f)
+    {
+        juce::ColourGradient beam (juce::Colours::white, 0.95f, 0.0f, juce::Colours::white.withAlpha (0.0f), 2.2f, 0.0f, false);
+        g.setGradientFill (beam);
+        juce::Path p;
+        p.startNewSubPath (0.95f, 0.21f);
+        p.lineTo (2.2f, 0.4f);
+        p.lineTo (2.2f, -0.1f);
+        p.lineTo (0.95f, 0.15f);
+        p.closeSubPath();
+        g.fillPath (p);
+        glow (0.934f, 0.185f, 0.32f, juce::Colours::white);
+        glow (0.934f, 0.185f, 0.1f, juce::Colours::white);
+    }
 
     // Выключенная машина мигает аварийкой
     if (! on && phase < 0.5f)
