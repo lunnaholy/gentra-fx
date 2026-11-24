@@ -82,7 +82,8 @@ enum { black, rustCar, red, green, orange, purple, blue, pink, silver, grey, yel
 
 juce::Image asset (const char* name) { return RoadView::image (name); }
 
-const juce::Identifier hiddenId { "hiddenCars" }; // битовая маска скрытых машин в состоянии плагина
+const juce::Identifier hiddenId { "hiddenCars" };   // битовая маска скрытых машин в состоянии плагина
+const juce::Identifier hiddenOffId { "hiddenOff" }; // какие из них были выключены до скрытия
 
 float posMod (float a, float n)
 {
@@ -227,12 +228,15 @@ void RoadView::setHidden (int car, bool hide)
     const int mask = static_cast<int> (apvts.state.getProperty (hiddenId, 0));
     hiddenMask = hide ? mask | (1 << car) : mask & ~(1 << car);
     apvts.state.setProperty (hiddenId, hiddenMask, nullptr);
-    // Скрытый рабочий эффект выключается, вернувшийся в гараже — включается.
+    // Скрытый рабочий эффект выключается, вернувшийся из гаража — включается, если был включён до скрытия.
     if (car < numWorking)
         if (auto* on = apvts.getParameter (working[static_cast<size_t> (car)].on))
         {
+            const int offMask = static_cast<int> (apvts.state.getProperty (hiddenOffId, 0));
+            if (hide && ! ((mask >> car) & 1)) // повторное скрытие не затирает запомненное
+                apvts.state.setProperty (hiddenOffId, isOn (car) ? offMask & ~(1 << car) : offMask | (1 << car), nullptr);
             on->beginChangeGesture();
-            on->setValueNotifyingHost (hide ? 0.0f : 1.0f);
+            on->setValueNotifyingHost (! hide && ! ((offMask >> car) & 1) ? 1.0f : 0.0f);
             on->endChangeGesture();
         }
     if (hide && car == selected)

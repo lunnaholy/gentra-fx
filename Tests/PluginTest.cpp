@@ -261,7 +261,12 @@ void garage()
         road.setHidden (1, true);
         CHECK (p.apvts.getRawParameterValue ("loresOn")->load() < 0.5f);
         road.setHidden (1, false);
-        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() > 0.5f); // вернулся — включён
+        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() > 0.5f); // вернулся — включён, как был
+        setParam (p, "loresOn", 0.0f);
+        road.setHidden (1, true);
+        road.setHidden (1, false);
+        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() < 0.5f); // был выключен — вернулся выключенным
+        setParam (p, "loresOn", 1.0f);
         road.setHidden (5, false);
         road.setHidden (7, true);
         for (int i = 0; i < 600; ++i)
