@@ -14,7 +14,7 @@
 
 ## Подготовка
 
-### ART-01 — Свои фото кузова и колёс `[ ]`
+### ART-01 — Свои фото кузова и колёс `[x]`
 Заменить заглушки в `Assets/` (`car_*.png`, `wheel.png`, при желании фон). Подогнать положение колёс
 (`rearWheelX`, `frontWheelX`, `wheelY`, `wheelR`) и поставить `pixelScale = 1` в начале `Source/RoadView.cpp`.
 Проверка: `build/GentraTest --snapshot кадр.png 60 200 0`.

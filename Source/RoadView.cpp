@@ -19,11 +19,11 @@ namespace
 //   tint.png, rust.png накладки того же размера, что car_black / car_rust: тонировка, ржавчина
 //   plate.png          190×36    номер в углу
 // Положение колёс на кузове — в долях длины машины:
-constexpr float rearWheelX = 0.215f, frontWheelX = 0.8f;
-constexpr float wheelY = 0.074f; // центр колеса над асфальтом
-constexpr float wheelR = 0.087f; // радиус колеса
+constexpr float rearWheelX = 0.222f, frontWheelX = 0.81f;
+constexpr float wheelY = 0.083f; // центр колеса над асфальтом
+constexpr float wheelR = 0.083f; // радиус колеса
 // 2 — крупный пиксель, как в прототипе. Для реалистичных фото поставьте 1.
-constexpr int pixelScale = 2;
+constexpr int pixelScale = 1;
 // Тряска от низа: смещение в пикселях окна при пике низа 0 dBFS и время затухания, с.
 constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 // =======================================================================
@@ -560,7 +560,7 @@ void RoadView::drawCar (juce::Graphics& g, int i) const
         flame.addColour (0.4, juce::Colour (0xffff8a1f));
         g.setGradientFill (flame);
         juce::Path p;
-        p.addTriangle (0.04f, 0.05f, 0.03f - len, 0.075f, 0.04f, 0.1f);
+        p.addTriangle (0.04f, 0.07f, 0.03f - len, 0.095f, 0.04f, 0.12f);
         g.fillPath (p);
     }
     else if (i == blue)
@@ -604,14 +604,14 @@ void RoadView::drawCar (juce::Graphics& g, int i) const
 
     // Свет фар на асфальте
     {
-        juce::ColourGradient beam (rgba (255, 240, 190, i == white && on ? 0.3f : 0.16f), 0.98f, 0.0f,
+        juce::ColourGradient beam (rgba (255, 240, 190, i == white && on ? 0.3f : 0.16f), 0.95f, 0.0f,
                                    rgba (255, 240, 190, 0.0f), 1.6f, 0.0f, false);
         g.setGradientFill (beam);
         juce::Path p;
-        p.startNewSubPath (0.98f, 0.16f);
+        p.startNewSubPath (0.95f, 0.2f);
         p.lineTo (1.6f, 0.22f);
         p.lineTo (1.6f, -0.02f);
-        p.lineTo (0.98f, 0.1f);
+        p.lineTo (0.95f, 0.16f);
         p.closeSubPath();
         g.fillPath (p);
     }
@@ -676,16 +676,16 @@ void RoadView::drawCar (juce::Graphics& g, int i) const
         g.setGradientFill (juce::ColourGradient (colour, x, y, colour.withAlpha (0.0f), x + r, y, true));
         g.fillEllipse (x - r, y - r, 2.0f * r, 2.0f * r);
     };
-    glow (0.965f, 0.158f, 0.09f, rgba (255, 240, 180, 0.55f));
-    glow (0.03f, 0.188f, 0.06f, rgba (255, 40, 40, 0.5f));
+    glow (0.934f, 0.185f, 0.09f, rgba (255, 240, 180, 0.55f));
+    glow (0.05f, 0.227f, 0.06f, rgba (255, 40, 40, 0.5f));
 
     // Выключенная машина мигает аварийкой
     if (! on && phase < 0.5f)
     {
         g.setColour (juce::Colour (0xffff9d1c));
-        g.fillEllipse (0.975f - 0.018f, 0.15f - 0.018f, 0.036f, 0.036f);
-        g.fillEllipse (0.03f - 0.018f, 0.2f - 0.018f, 0.036f, 0.036f);
-        g.fillEllipse (0.745f - 0.012f, 0.174f - 0.012f, 0.024f, 0.024f);
+        g.fillEllipse (0.934f - 0.018f, 0.185f - 0.018f, 0.036f, 0.036f);
+        g.fillEllipse (0.05f - 0.018f, 0.227f - 0.018f, 0.036f, 0.036f);
+        g.fillEllipse (0.731f - 0.012f, 0.2f - 0.012f, 0.024f, 0.024f);
     }
 }
 
