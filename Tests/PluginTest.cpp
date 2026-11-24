@@ -5,7 +5,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
-#include "../Source/PluginProcessor.h"
+#include "../Source/PluginEditor.h"
 
 #define CHECK(cond) \
     do { if (! (cond)) { std::printf ("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); std::exit (1); } } while (false)
@@ -146,11 +146,35 @@ void run (double sampleRate)
     CHECK (std::abs (q.apvts.getRawParameterValue ("bass")->load() - 37.0f) < 0.01f);
     CHECK (std::abs (q.apvts.getRawParameterValue ("lores")->load() - 82.0f) < 0.01f);
 }
+
+// --snapshot out.png [percent] [frames]: рендерит интерфейс в PNG без окна.
+int snapshot (const char* path, float percent, int frames)
+{
+    GentraAudioProcessor p;
+    setParam (p, "bass", percent);
+    setParam (p, "lores", percent);
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
+    CHECK (gentra != nullptr);
+    for (int i = 0; i < frames; ++i)
+        gentra->advance (1.0f / 60.0f);
+
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
+    const juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (path));
+    file.deleteFile();
+    juce::FileOutputStream out (file);
+    CHECK (out.openedOk() && juce::PNGImageFormat().writeImageToStream (image, out));
+    return 0;
+}
 }
 
-int main()
+int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    if (argc >= 3 && std::strcmp (argv[1], "--snapshot") == 0)
+        return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0);
 
     for (double sampleRate : { 44100.0, 48000.0, 96000.0, 192000.0 })
         run (sampleRate);
