@@ -65,6 +65,7 @@ private:
     void showPopup (int car);
     void showGarage (bool);
     void layoutContent();
+    void placePopup (int numRows);
 
     GentraAudioProcessor& gentraProcessor;
     juce::PropertiesFile settings { settingsFile, settingsOptions() };

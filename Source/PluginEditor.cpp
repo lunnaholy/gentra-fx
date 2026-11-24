@@ -227,19 +227,7 @@ void GentraAudioProcessorEditor::layoutContent()
     content.setBounds (0, 0, RoadView::width, RoadView::height);
     road.setBounds (content.getLocalBounds());
 
-    popup.setTransform ({});
-    // Пропорции — как у panel.png (760×213); винты в углах, поэтому поля по 34.
-    popup.setBounds ((RoadView::width - 380) / 2, RoadView::height - 8 - 106, 380, 106);
-    onButton.setBounds (34, 12, 151, 30);
-    closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
-    for (int i = 0; i < 2; ++i)
-    {
-        auto& row = rows[static_cast<size_t> (i)];
-        const int y = 48 + i * 24;
-        row.label.setBounds (34, y, 88, 22);
-        row.slider.setBounds (122, y, 224, 22);
-    }
-    rotate (popup, -0.6f);
+    placePopup (static_cast<int> (rows.size()));
 
     garageButton.setTransform ({});
     garageButton.setBounds (RoadView::width - 8 - 96, 8, 96, 34);
@@ -252,6 +240,25 @@ void GentraAudioProcessorEditor::layoutContent()
     garageClose.setBounds (gw - 35 - 36, 12, 36, 30);
     for (int i = 0; i < RoadView::numCars; ++i)
         chips[static_cast<size_t> (i)].setBounds ((gw - 3 * cw - 2 * gap) / 2 + (i % 3) * (cw + gap), 50 + (i / 3) * (ch + 4), cw, ch);
+}
+
+// Табличка под число строк доп. параметров: у машины с одним параметром она ниже, без пустой строки.
+void GentraAudioProcessorEditor::placePopup (int numRows)
+{
+    popup.setTransform ({});
+    // Пропорции при двух строках — как у panel.png (760×213); винты в углах, поэтому поля по 34.
+    const int h = 58 + numRows * 24;
+    popup.setBounds ((RoadView::width - 380) / 2, RoadView::height - 8 - h, 380, h);
+    onButton.setBounds (34, 12, 151, 30);
+    closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
+    for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+    {
+        auto& row = rows[static_cast<size_t> (i)];
+        const int y = 48 + i * 24;
+        row.label.setBounds (34, y, 88, 22);
+        row.slider.setBounds (122, y, 224, 22);
+    }
+    rotate (popup, -0.6f);
 }
 
 void GentraAudioProcessorEditor::showGarage (bool show)
@@ -270,6 +277,9 @@ void GentraAudioProcessorEditor::showPopup (int car)
     popup.setVisible (car >= 0);
     if (car < 0)
         return;
+
+    const auto& carExtras = extras[static_cast<size_t> (car)];
+    placePopup (static_cast<int> (std::count_if (carExtras.begin(), carExtras.end(), [] (const Extra& e) { return e.id != nullptr; })));
 
     auto& apvts = gentraProcessor.apvts;
     onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
