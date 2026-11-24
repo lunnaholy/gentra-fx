@@ -32,7 +32,9 @@ constexpr float W = static_cast<float> (RoadView::width);
 constexpr float H = static_cast<float> (RoadView::height);
 constexpr float carLen = 150.0f, laneGap = 60.0f, roadTop = 200.0f;
 constexpr int lanes = 4, shoulder = 4;
-constexpr float span = 1440.0f; // длина «кольца», по которому едет поток
+// Длина «кольца», по которому едет поток, = ширина экрана: уехавшая за край машина
+// тут же въезжает с другой стороны и целиком не пропадает никогда.
+constexpr float span = W;
 constexpr float pi = juce::MathConstants<float>::pi;
 
 constexpr float laneY (float lane) { return roadTop + laneGap * (0.8f + lane); }
@@ -75,6 +77,7 @@ float posMod (float a, float n)
 
 float ahead (float from, float to) { return posMod (to - from, span); }           // расстояние вперёд по кольцу
 float offset (float a, float b) { return ahead (b, a + span * 0.5f) - span * 0.5f; } // a − b по кольцу, со знаком
+float wrap (float d) { return posMod (d + span * 0.5f, span) - span * 0.5f; }          // разница по кольцу в −span/2..span/2
 
 // Повторяет картинку с шагом period: копия на x = k·period − scroll, видимая часть — [x0, x1].
 void drawStrip (juce::Graphics& g, const juce::Image& img, float scrollX, float period,
@@ -378,7 +381,7 @@ int RoadView::carAt (juce::Point<float> p) const
     {
         const auto& c = cars[static_cast<size_t> (i)];
         const float half = carLen * c.sc * 0.6f;
-        if (std::abs (x - c.px) < half && y < c.py + 10.0f && y > c.py - 0.42f * carLen * c.sc
+        if (std::abs (wrap (x - c.px)) < half && y < c.py + 10.0f && y > c.py - 0.42f * carLen * c.sc
             && (best < 0 || c.lp > cars[static_cast<size_t> (best)].lp))
             best = i;
     }
@@ -534,11 +537,15 @@ void RoadView::drawScene (juce::Graphics& g) const
         order[static_cast<size_t> (i)] = i;
     std::sort (order.begin(), order.end(), [this] (int a, int b) { return cars[static_cast<size_t> (a)].lp < cars[static_cast<size_t> (b)].lp; });
 
+    // Машина у края рисуется и копией с другой стороны кольца.
+    const float reach = carLen * 1.7f; // с учётом шлейфов эффектов за машиной
     for (int i : order)
-        drawCar (g, i);
+        for (float k : { -1.0f, 0.0f, 1.0f })
+            if (const float px = cars[static_cast<size_t> (i)].px + k * span; px + reach > x0 && px - reach < x1)
+                drawCar (g, i, px);
 }
 
-void RoadView::drawCar (juce::Graphics& g, int i) const
+void RoadView::drawCar (juce::Graphics& g, int i, float px) const
 {
     const auto& c = cars[static_cast<size_t> (i)];
     const auto& body = bodies[static_cast<size_t> (i)];
@@ -547,7 +554,7 @@ void RoadView::drawCar (juce::Graphics& g, int i) const
 
     juce::Graphics::ScopedSaveState save (g);
     // Дальше всё в единицах машины: x 0..1 от зада к носу, y вверх от асфальта.
-    g.addTransform (juce::AffineTransform::translation (-0.5f, 0.0f).scaled (carLen * c.sc, -carLen * c.sc).translated (c.px, c.py));
+    g.addTransform (juce::AffineTransform::translation (-0.5f, 0.0f).scaled (carLen * c.sc, -carLen * c.sc).translated (px, c.py));
 
     // Тень
     {

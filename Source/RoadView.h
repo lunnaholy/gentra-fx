@@ -73,7 +73,7 @@ private:
     juce::RangedAudioParameter* knobParam (int wheel) const;
 
     void drawScene (juce::Graphics&) const;
-    void drawCar (juce::Graphics&, int car) const;
+    void drawCar (juce::Graphics&, int car, float px) const; // px — где рисовать (копия у края кольца)
     void drawOverlays (juce::Graphics&) const;
 
     juce::AudioProcessorValueTreeState& apvts;
