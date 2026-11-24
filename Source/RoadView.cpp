@@ -8,12 +8,12 @@ namespace
 // Все картинки — PNG в Assets/, вшиваются в плагин при сборке. Замените файл с тем же именем
 // и пересоберите. Размеры ниже — в пикселях окна; разрешение картинки может быть любым,
 // важны только пропорции.
-//   sky.png            900×200   небо до горизонта
-//   mountains.png      600×60    горы, бесшовно по горизонтали, низ = горизонт
-//   skyline.png        1160×140  город, бесшовно, низ = горизонт
-//   road.png           1440×387  дорога от бордюра (y = 193) вниз, бесшовно; полосы — laneY()
-//   lamp.png           30×150    фонарь, повторяется каждые 280, низ = верх дороги
-//   props.png          1200×80   обочина (арбузы, шины), бесшовно; земля на 60 от верха
+//   sky.png            900×300   небо до горизонта (растягивается)
+//   mountains.png      543×60    горы, бесшовно по горизонтали, низ = горизонт
+//   skyline.png        694×140   город, бесшовно, низ = горизонт
+//   road.png           1333×390  дорога от верха бордюра (y = 184.5) вниз, бесшовно; полосы — laneY()
+//   lamp.png           40×150    фонарь, повторяется каждые 280, низ = верх дороги
+//   props.png          740×90    обочина, бесшовно; земля на 88 от верха
 //   car_<цвет>.png     кузов сбоку без колёс, нос вправо; ширина = длина машины, низ = асфальт
 //   wheel.png          колесо анфас, квадрат, колесо вписано в края
 //   tint.png, rust.png накладки того же размера, что car_black / car_rust: тонировка, ржавчина
@@ -499,14 +499,14 @@ void RoadView::drawScene (juce::Graphics& g) const
     const float ground = scroll + camU;
 
     g.drawImage (sky, { 0.0f, 0.0f, W, juce::jmax (40.0f, horizon) });
-    drawStrip (g, mountains, ground * 0.03f, 600.0f, 600.0f, 60.0f * cityScale, horizon - 60.0f * cityScale, 0.0f, W);
+    drawStrip (g, mountains, ground * 0.03f, 543.0f, 543.0f, 60.0f * cityScale, horizon - 60.0f * cityScale, 0.0f, W);
 
     {
         // Город чуть приближается вместе с камерой.
         const float zs = (1.0f + (zoom - 1.0f) * 0.4f) * cityScale;
         juce::Graphics::ScopedSaveState save (g);
         g.addTransform (juce::AffineTransform::translation (-W * 0.5f, 0.0f).scaled (zs).translated (W * 0.5f, horizon));
-        drawStrip (g, skyline, ground * 0.1f, 1160.0f, 1160.0f, 140.0f, -140.0f, W * 0.5f - W * 0.5f / zs, W * 0.5f + W * 0.5f / zs);
+        drawStrip (g, skyline, ground * 0.1f, 694.0f, 694.0f, 140.0f, -140.0f, W * 0.5f - W * 0.5f / zs, W * 0.5f + W * 0.5f / zs);
     }
 
     juce::Graphics::ScopedSaveState save (g);
@@ -515,9 +515,9 @@ void RoadView::drawScene (juce::Graphics& g) const
     const float margin = 2.0f + shakePx / zoom;
     const float x0 = W * 0.5f - W * 0.5f / zoom - margin, x1 = W * 0.5f + W * 0.5f / zoom + margin;
 
-    drawStrip (g, road, ground, 1440.0f, 1440.0f, 387.0f, roadTop - 7.0f, x0, x1);
-    drawStrip (g, props, ground * 1.1f, 1200.0f, 1200.0f, 80.0f, roadBottom + 40.0f - 60.0f, x0, x1);
-    drawStrip (g, lamp, ground * 0.8f, 280.0f, 30.0f, 150.0f, roadTop - 150.0f, x0, x1);
+    drawStrip (g, road, ground, 1333.0f, 1333.0f, 390.0f, roadTop - 15.5f, x0, x1);
+    drawStrip (g, props, ground * 1.1f, 740.0f, 740.0f, 90.0f, roadBottom + 40.0f - 88.0f, x0, x1);
+    drawStrip (g, lamp, ground * 0.8f, 280.0f, 40.0f, 150.0f, roadTop - 150.0f, x0, x1);
 
     std::array<int, numCars> order {};
     for (int i = 0; i < numCars; ++i)
