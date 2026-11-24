@@ -45,6 +45,14 @@ target_sources(SauceGentraFX PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp)
 
+# Графика интерфейса: замените файлы в Assets/ своими и пересоберите.
+juce_add_binary_data(GentraAssets SOURCES
+    Assets/body.png
+    Assets/wheel.png
+    Assets/traffic1.png
+    Assets/traffic2.png
+    Assets/traffic3.png)
+
 target_compile_definitions(SauceGentraFX PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -52,6 +60,7 @@ target_compile_definitions(SauceGentraFX PUBLIC
 
 target_link_libraries(SauceGentraFX
     PRIVATE
+        GentraAssets
         juce::juce_audio_utils
     PUBLIC
         juce::juce_recommended_config_flags
@@ -59,6 +68,7 @@ target_link_libraries(SauceGentraFX
         juce::juce_recommended_warning_flags)
 
 # Самопроверка: гоняет настоящий AudioProcessor без хоста. Запуск: ctest --test-dir build
+# Кадр интерфейса без DAW: build/GentraTest --snapshot кадр.png [ручки, %] [кадров анимации]
 enable_testing()
 add_executable(GentraTest Tests/PluginTest.cpp)
 target_link_libraries(GentraTest PRIVATE SauceGentraFX juce::juce_audio_utils)
