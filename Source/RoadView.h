@@ -24,7 +24,8 @@ public:
         bool bipolar = false;        // ручка от минуса до плюса: дуга и подпись — от середины, со знаком
         const char* mix = nullptr;   // параметр переднего колеса
         const char* on = nullptr;    // вкл/выкл
-        const char* sync = nullptr;  // «по такту»: тумблер в табличке; включён — под колесом доля такта (Dsp.h)
+        const char* sync = nullptr;     // «по такту»: тумблер в табличке
+        const char* syncMain = nullptr; // параметр заднего колеса, пока «по такту» включён (длительность ноты)
     };
     static const std::array<Working, numCars> working;
     static bool isWorking (int car) { return car >= 0 && working[static_cast<size_t> (car)].main != nullptr; }

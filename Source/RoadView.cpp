@@ -139,7 +139,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[rustCar] = { "lores", "LO-RES", "%", 0, false, "loresMix", "loresOn" };
     w[red] = { "drive", "ДРАЙВ", "%", 0, false, "distMix", "distOn" };
     w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
-    w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync" };
+    w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
     return w;
 }();
 
@@ -617,7 +617,9 @@ int RoadView::wheelAt (juce::Point<float> p) const
 juce::RangedAudioParameter* RoadView::knobParam (int w) const
 {
     const auto& info = working[static_cast<size_t> (selected)];
-    return apvts.getParameter (w == 0 ? info.main : info.mix);
+    // По такту заднее колесо крутит длительность ноты, иначе — время в мс.
+    const bool note = info.syncMain != nullptr && param (info.sync) > 0.5f;
+    return apvts.getParameter (w == 0 ? (note ? info.syncMain : info.main) : info.mix);
 }
 
 // ---------------- мышь ----------------
@@ -807,7 +809,9 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     else if (i == silver && on)
     {
         // Повторы: копии сзади — шаг от времени, число и затухание от повторов, прозрачность от Mix.
-        const float spacing = 0.1f + 0.35f * (param ("delayTime") - 60.0f) / 540.0f;
+        const float length = param ("delaySync") > 0.5f ? param ("delayNote") / static_cast<float> (gentra::numDelayDivisions - 1)
+                                                         : (param ("delayTime") - 60.0f) / 540.0f;
+        const float spacing = 0.1f + 0.35f * length;
         const float feedback = param ("delayFeedback") * 0.01f;
         const float mix = param ("delayMix") * 0.01f;
         const int copies = 1 + juce::roundToInt (feedback * 4.0f);
@@ -994,13 +998,14 @@ void RoadView::drawOverlays (juce::Graphics& g) const
             const float y = centre.y + wheelHitRadius();
             const auto* p = knobParam (w);
             const auto& info = working[static_cast<size_t> (selected)];
-            const auto label = w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
+            const bool note = w == 0 && info.sync != nullptr && param (info.sync) > 0.5f;
+            const auto label = note ? ru ("НОТА") : w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
             float v = p->convertFrom0to1 (p->getValue());
             if (std::abs (v) < 0.05f)
                 v = 0.0f; // без «-0.0»
             juce::String value;
-            if (w == 0 && info.sync != nullptr && param (info.sync) > 0.5f)
-                value = gentra::delayDivisionNames[static_cast<size_t> (gentra::delayDivision (p->getValue()))];
+            if (note)
+                value = p->getCurrentValueAsText(); // «1/8.», «1/4T»
             else if (w == 0)
                 value = (info.bipolar && v > 0.0f ? "+" : "") + juce::String (v, info.mainDecimals) + " " + ru (info.mainUnit);
             else
