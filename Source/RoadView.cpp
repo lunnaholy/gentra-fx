@@ -8,10 +8,10 @@ namespace
 // Все картинки — PNG в Assets/, вшиваются в плагин при сборке. Замените файл с тем же именем
 // и пересоберите. Размеры ниже — в пикселях окна; разрешение картинки может быть любым,
 // важны только пропорции.
-//   sky.png            900×300   небо до горизонта (растягивается)
+//   sky.jpg            900×300   небо до горизонта (растягивается)
 //   mountains.png      543×60    горы, бесшовно по горизонтали, низ = горизонт
 //   skyline.png        694×140   город, бесшовно, низ = горизонт
-//   road.png           1333×390  дорога от верха бордюра (y = 184.5) вниз, бесшовно; полосы — laneY()
+//   road.jpg           1333×390  дорога от верха бордюра (y = 184.5) вниз, бесшовно; полосы — laneY()
 //   lamp.png           40×150    фонарь, повторяется каждые 280, низ = верх дороги
 //   props.png          740×90    обочина, бесшовно; земля на 88 от верха
 //   car_<цвет>.png     кузов сбоку без колёс, нос вправо; ширина = длина машины, низ = асфальт
@@ -142,8 +142,8 @@ juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[stati
 
 RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level)
     : apvts (state), bassLevel (std::move (level)),
-      sky (asset ("sky_png")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
-      road (asset ("road_png")), lamp (asset ("lamp_png")), props (asset ("props_png")),
+      sky (asset ("sky_jpg")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
+      road (asset ("road_jpg")), lamp (asset ("lamp_png")), props (asset ("props_png")),
       wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
       camX (span * 0.5f), focusY (H * 0.5f), centreY (H * 0.5f), lastFocusY (H * 0.5f)
 {
