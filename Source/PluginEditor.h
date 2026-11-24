@@ -8,6 +8,13 @@ struct BoxLook final : juce::LookAndFeel_V4
 {
     BoxLook();
     juce::Font getLabelFont (juce::Label&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float minPos, float maxPos,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
+    int getSliderThumbRadius (juce::Slider&) override;
+
+    // Ползунок: пустой паз, поверх — светящийся до ручки, сверху ручка.
+    juce::Image track = RoadView::image ("slider_track_png"), fill = RoadView::image ("slider_fill_png"),
+                thumb = RoadView::image ("slider_thumb_png");
 };
 
 // Металлическая табличка (panel.png); дети раскладываются снаружи.

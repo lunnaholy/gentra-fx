@@ -30,9 +30,6 @@ void rotate (juce::Component& c, float deg)
 BoxLook::BoxLook()
 {
     setColour (juce::Label::textColourId, juce::Colours::black);
-    setColour (juce::Slider::backgroundColourId, juce::Colours::white);
-    setColour (juce::Slider::trackColourId, juce::Colours::black);
-    setColour (juce::Slider::thumbColourId, juce::Colours::black);
     setColour (juce::Slider::textBoxTextColourId, juce::Colours::black);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
@@ -41,6 +38,31 @@ BoxLook::BoxLook()
 juce::Font BoxLook::getLabelFont (juce::Label&)
 {
     return RoadView::font (16.0f);
+}
+
+constexpr int thumbHalf = 12; // ручка ~24×22; ползунок ходит в пределах, где она целиком внутри паза
+
+int BoxLook::getSliderThumbRadius (juce::Slider&)
+{
+    return thumbHalf;
+}
+
+void BoxLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float, float,
+                                juce::Slider::SliderStyle, juce::Slider&)
+{
+    // x..x+width — ход центра ручки; паз шире на полручки с каждой стороны.
+    const float cy = static_cast<float> (y) + static_cast<float> (height) * 0.5f;
+    const auto groove = juce::Rectangle<float> (static_cast<float> (x - thumbHalf), cy - 8.0f,
+                                                static_cast<float> (width + 2 * thumbHalf), 16.0f);
+    g.setOpacity (1.0f);
+    g.drawImage (track, groove);
+    {
+        juce::Graphics::ScopedSaveState s (g);
+        g.reduceClipRegion (groove.withRight (sliderPos).getSmallestIntegerContainer());
+        g.drawImage (fill, groove);
+    }
+    const float tw = 2.0f * thumbHalf, th = tw * static_cast<float> (thumb.getHeight()) / static_cast<float> (thumb.getWidth());
+    g.drawImage (thumb, { sliderPos - tw * 0.5f, cy - th * 0.5f, tw, th });
 }
 
 void Box::paint (juce::Graphics& g)
