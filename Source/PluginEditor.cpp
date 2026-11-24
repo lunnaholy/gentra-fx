@@ -208,7 +208,7 @@ void GentraAudioProcessorEditor::resized()
 juce::File GentraAudioProcessorEditor::settingsFile = [] {
     juce::PropertiesFile::Options o;
     o.applicationName = JucePlugin_Name;
-    o.filenameSuffix = "settings";
+    o.filenameSuffix = "ui.settings"; // «.settings» без «ui» занят Standalone-обёрткой JUCE (аудиоустройство) — затёрли бы
     o.osxLibrarySubFolder = "Application Support";
     return o.getDefaultFile();
 }();
