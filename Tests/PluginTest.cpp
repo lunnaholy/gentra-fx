@@ -678,6 +678,56 @@ void garage()
     CHECK (q.apvts.getRawParameterValue ("bassOn")->load() < 0.5f);
 }
 
+// Панель гаража: перетаскивание строки меняет порядок цепочки, тумблер прячет машину, клик открывает её на дороге.
+void garagePanel()
+{
+    GentraAudioProcessor p;
+    RoadView road (p.apvts, nullptr);
+    GaragePanel panel (p, road);
+    panel.setSize (GaragePanel::width, RoadView::height - 16);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    juce::Point<float> downAt;
+    const auto event = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &panel, &panel, now, downAt, now, 1, dragged);
+    };
+    const auto row = [] (int slot) { return 62.0f + 39.0f * static_cast<float> (slot) + 18.0f; }; // середина строки
+    const auto drag = [&] (int fromSlot, int toSlot)
+    {
+        downAt = { 60.0f, row (fromSlot) };
+        panel.mouseDown (event (downAt, false));
+        for (int i = 1; i <= 10; ++i)
+            panel.mouseDrag (event ({ 60.0f, juce::jmap (static_cast<float> (i), 0.0f, 10.0f, row (fromSlot), row (toSlot)) }, true));
+        panel.mouseUp (event ({ 60.0f, row (toSlot) }, true));
+    };
+    const auto click = [&] (juce::Point<float> at)
+    {
+        downAt = at;
+        panel.mouseDown (event (at, false));
+        panel.mouseUp (event (at, false));
+    };
+
+    drag (4, 0); // серебряная (дилей) — первой
+    auto expected = GentraAudioProcessor::defaultOrder;
+    std::rotate (expected.begin(), expected.begin() + 4, expected.begin() + 5);
+    CHECK (p.getCarOrder() == expected);
+    drag (0, 2);
+    std::rotate (expected.begin(), expected.begin() + 1, expected.begin() + 3);
+    CHECK (p.getCarOrder() == expected);
+
+    // Тумблер справа: чёрная (снова первая) уезжает в гараж и возвращается.
+    const float toggleX = static_cast<float> (GaragePanel::width) - 16.0f - 28.0f;
+    click ({ toggleX, row (0) });
+    CHECK (road.isHidden (gentra::car::black) && p.getCarOrder() == expected);
+    click ({ toggleX, row (0) });
+    CHECK (! road.isHidden (gentra::car::black));
+
+    click ({ 60.0f, row (0) }); // клик по строке — открыть машину
+    CHECK (road.getSelected() == gentra::car::black);
+}
+
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
 
 void beatSync()
@@ -742,7 +792,8 @@ void useTempSettings (double scale)
     juce::PropertiesFile (f, {}).setValue ("uiScale", scale);
 }
 
-// --snapshot out.png [percent] [frames] [car] [scale]: рендерит интерфейс в PNG без окна; car — какую машину открыть.
+// --snapshot out.png [percent] [frames] [car] [scale]: рендерит интерфейс в PNG без окна; car — какую машину открыть
+// (−2 — гараж, −3 − n — гараж и машина n).
 int snapshot (const char* path, float percent, int frames, int car, double scale)
 {
     useTempSettings (scale);
@@ -760,10 +811,12 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
     CHECK (gentra != nullptr);
-    if (car == -2) // гараж с парой скрытых машин
+    if (car <= -2) // гараж с парой скрытых машин; −3 и дальше — плюс открытая машина −car − 3
     {
         p.apvts.state.setProperty ("hiddenCars", (1 << 3) | (1 << 7), nullptr);
         gentra->openGarage();
+        if (car <= -3)
+            gentra->select (-car - 3);
     }
     else
         gentra->select (car);
@@ -801,6 +854,7 @@ int main (int argc, char** argv)
     traffic();
     uiScale();
     garage();
+    garagePanel();
     beatSync();
 
     std::printf ("OK\n");

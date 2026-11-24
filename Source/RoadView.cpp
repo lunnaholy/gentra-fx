@@ -68,6 +68,7 @@ struct CarInfo
 {
     const char* asset;
     const char* name;
+    const char* model; // подпись в гараже
     juce::uint32 colour;
     bool on;        // для декоративных
     float strength; // для декоративных: сила «эффекта» = скорость
@@ -76,39 +77,39 @@ struct CarInfo
 
 // Порядок и значения — как в прототипе.
 const std::array<CarInfo, RoadView::numCars> carInfo { {
-    { "car_black_png", "Саб и тонировка", 0xff1b1c21, true, 0.0f },
+    { "car_black_png", "Саб и тонировка", "Gentra", 0xff1b1c21, true, 0.0f },
     // Приора
-    { "car_rust_png", "Low-res", 0xffb7a688, true, 0.0f,
+    { "car_rust_png", "Low-res", "Приора", 0xffb7a688, true, 0.0f,
       { 0.2171f, 0.8121f, 0.0813f, 0.0814f, { 0.94f, 0.2f }, { 0.04f, 0.215f }, { 0.73f, 0.193f }, { 0.05f, 0.105f } } },
     // Жигули
-    { "car_red_png", "Дисторшн", 0xffb3202a, true, 0.2475f,
+    { "car_red_png", "Дисторшн", "Жигули", 0xffb3202a, true, 0.2475f,
       { 0.2277f, 0.8369f, 0.0825f, 0.0823f, { 0.978f, 0.198f }, { 0.018f, 0.2f }, { 0.937f, 0.208f }, { 0.05f, 0.085f } } },
     // BYD Seagull: повторитель в зеркале
-    { "car_green_png", "Питчер", 0xff1f8a3b, false, 0.0f,
+    { "car_green_png", "Питчер", "BYD Seagull", 0xff1f8a3b, false, 0.0f,
       { 0.1619f, 0.8181f, 0.0959f, 0.0957f, { 0.93f, 0.222f }, { 0.07f, 0.305f }, { 0.635f, 0.29f }, { 0.04f, 0.1f } } },
     // Дамас, белый (был оранжевым): повторитель у передней стойки
-    { "car_orange_png", "Форманта", 0xffe8eaec, false, 0.0f,
+    { "car_orange_png", "Форманта", "Дамас", 0xffe8eaec, false, 0.0f,
       { 0.1956f, 0.7833f, 0.0923f, 0.0923f, { 0.98f, 0.23f }, { 0.022f, 0.26f }, { 0.558f, 0.355f }, { 0.04f, 0.11f } } },
     // Спарк, салатовый (был фиолетовым)
-    { "car_purple_png", "Гармонайзер", 0xff93c02e, true, 0.35f,
+    { "car_purple_png", "Гармонайзер", "Спарк", 0xff93c02e, true, 0.35f,
       { 0.1566f, 0.8265f, 0.098f, 0.098f, { 0.923f, 0.249f }, { 0.059f, 0.298f }, { 0.734f, 0.22f }, { 0.04f, 0.12f } } },
     // Hongqi E-QM5, чёрный (был синим): повторитель в зеркале
-    { "car_blue_png", "Хорус", 0xff15161a, true, 0.128f,
+    { "car_blue_png", "Хорус", "Hongqi E-QM5", 0xff15161a, true, 0.128f,
       { 0.2026f, 0.8118f, 0.0806f, 0.0805f, { 0.955f, 0.16f }, { 0.05f, 0.2f }, { 0.665f, 0.24f }, { 0.04f, 0.07f } } },
     // Лисян: повторитель в зеркале
-    { "car_pink_png", "Фэйзер", 0xffff5fa2, false, 0.0f,
+    { "car_pink_png", "Фэйзер", "Лисян", 0xffff5fa2, false, 0.0f,
       { 0.216f, 0.8189f, 0.0888f, 0.0889f, { 0.95f, 0.205f }, { 0.06f, 0.25f }, { 0.665f, 0.255f }, { 0.04f, 0.1f } } },
     // BYD Song Plus: повторитель в зеркале
-    { "car_silver_png", "Дилей", 0xffa3acb6, true, 0.15f,
+    { "car_silver_png", "Дилей", "BYD Song Plus", 0xffa3acb6, true, 0.15f,
       { 0.2124f, 0.814f, 0.0883f, 0.0882f, { 0.94f, 0.2f }, { 0.06f, 0.25f }, { 0.67f, 0.27f }, { 0.04f, 0.1f } } },
     // BYD Yuan Up: повторитель в зеркале
-    { "car_grey_png", "Реверб", 0xff4d545c, true, 0.165f,
+    { "car_grey_png", "Реверб", "BYD Yuan Up", 0xff4d545c, true, 0.165f,
       { 0.1928f, 0.8344f, 0.0916f, 0.0914f, { 0.95f, 0.225f }, { 0.05f, 0.25f }, { 0.675f, 0.3f }, { 0.04f, 0.1f } } },
     // Zeekr 007: повторитель в зеркале
-    { "car_yellow_png", "Гейт", 0xfff2c230, false, 0.0f,
+    { "car_yellow_png", "Гейт", "Zeekr 007", 0xfff2c230, false, 0.0f,
       { 0.2024f, 0.8086f, 0.0873f, 0.0872f, { 0.94f, 0.186f }, { 0.06f, 0.212f }, { 0.645f, 0.232f }, { 0.05f, 0.09f } } },
     // Нексия
-    { "car_white_png", "Эквалайзер", 0xffeef0f2, true, 0.1667f,
+    { "car_white_png", "Эквалайзер", "Нексия", 0xffeef0f2, true, 0.1667f,
       { 0.2234f, 0.8154f, 0.0796f, 0.0796f, { 0.947f, 0.183f }, { 0.038f, 0.205f }, { 0.737f, 0.197f }, { 0.05f, 0.1f } } },
 } };
 
@@ -211,6 +212,7 @@ juce::Font RoadView::font (float size)
 }
 
 juce::String RoadView::effectName (int car) { return ru (carInfo[static_cast<size_t> (car)].name); }
+juce::String RoadView::carModel (int car) { return ru (carInfo[static_cast<size_t> (car)].model); }
 juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[static_cast<size_t> (car)].colour); }
 
 RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level, BeatClock clock)
@@ -563,7 +565,8 @@ void RoadView::advance (float dt)
         c.spin += dt * (3.0f + c.ve * 16.0f);
     }
 
-    // Камера едет за открытой машиной и приближается к ней.
+    // Камера едет за открытой машиной и приближается к ней — в середине незакрытой гаражом части.
+    viewSmooth += (viewWidth - viewSmooth) * juce::jmin (1.0f, dt * 6.0f);
     const Car* f = selected >= 0 ? &cars[static_cast<size_t> (selected)] : nullptr;
     const float follow = juce::jmin (1.0f, dt * (f != nullptr ? 12.0f : 5.0f));
     const float step = offset (f != nullptr ? f->x : span * 0.5f, camX) * follow;
@@ -574,11 +577,12 @@ void RoadView::advance (float dt)
     if (f != nullptr)
     {
         lastFocusY = laneY (f->lp) - 0.12f * carLen;
-        zoomGoal = juce::jmin (W * 0.72f, H * 1.4f) / (carLen * laneScale (f->lp));
+        zoomGoal = juce::jmin (viewSmooth * 0.72f, H * 1.4f) / (carLen * laneScale (f->lp));
     }
     zoom = 1.0f + (zoomGoal - 1.0f) * focus;
     focusY = juce::jmap (focus, H * 0.5f, lastFocusY);
     centreY = juce::jmap (focus, H * 0.5f, H * 0.47f);
+    centreX = juce::jmap (focus, W * 0.5f, viewSmooth * 0.5f);
 
     // Тряска: мгновенная атака, экспоненциальный спад. Земля прыгает сильнее, чем ездит вбок.
     const float level = bassLevel != nullptr ? juce::jlimit (0.0f, 1.0f, bassLevel()) : 0.0f;
@@ -619,7 +623,7 @@ void RoadView::place()
 
 juce::Point<float> RoadView::toScreen (float worldX, float worldY) const
 {
-    return { (worldX - W * 0.5f) * zoom + W * 0.5f + shake.x, (worldY - focusY) * zoom + centreY + shake.y };
+    return { (worldX - W * 0.5f) * zoom + centreX + shake.x, (worldY - focusY) * zoom + centreY + shake.y };
 }
 
 juce::Point<float> RoadView::wheelCentre (int w) const
@@ -648,7 +652,7 @@ bool RoadView::knobsVisible() const
 
 int RoadView::carAt (juce::Point<float> p) const
 {
-    const float x = (p.x - shake.x - W * 0.5f) / zoom + W * 0.5f;
+    const float x = (p.x - shake.x - centreX) / zoom + W * 0.5f;
     const float y = (p.y - shake.y - centreY) / zoom + focusY;
 
     int best = -1;
@@ -796,9 +800,9 @@ void RoadView::drawScene (juce::Graphics& g) const
 
     juce::Graphics::ScopedSaveState save (g);
     // Земля и машины трясутся, небо и город — нет.
-    g.addTransform (juce::AffineTransform::translation (-W * 0.5f, -focusY).scaled (zoom).translated (W * 0.5f + shake.x, centreY + shake.y));
+    g.addTransform (juce::AffineTransform::translation (-W * 0.5f, -focusY).scaled (zoom).translated (centreX + shake.x, centreY + shake.y));
     const float margin = 2.0f + shakePx / zoom;
-    const float x0 = W * 0.5f - W * 0.5f / zoom - margin, x1 = W * 0.5f + W * 0.5f / zoom + margin;
+    const float x0 = W * 0.5f - centreX / zoom - margin, x1 = W * 0.5f + (W - centreX) / zoom + margin;
 
     drawStrip (g, road, ground, 1333.0f, 1333.0f, 390.0f, roadTop - 15.5f, x0, x1);
     drawStrip (g, props, ground * 1.1f, 740.0f, 740.0f, 90.0f, roadBottom + 40.0f - 88.0f, x0, x1);

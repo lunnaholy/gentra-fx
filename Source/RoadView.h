@@ -31,6 +31,7 @@ public:
     static bool isWorking (int car) { return car >= 0 && working[static_cast<size_t> (car)].main != nullptr; }
 
     static juce::String effectName (int car);
+    static juce::String carModel (int car);
     static juce::Colour bodyColour (int car);
     static juce::Image image (const char* binaryDataName); // PNG из Assets/
     static juce::Font font (float size);                   // шрифт интерфейса
@@ -45,6 +46,9 @@ public:
     bool isHidden (int car) const;
     void setHidden (int car, bool hidden);
     void drawThumbnail (juce::Graphics&, int car, juce::Rectangle<float> area, float alpha) const;
+
+    // Сколько окна слева не закрыто гаражом: открытая машина приближается в середину этой части.
+    void setVisibleWidth (float w) { viewWidth = w; }
 
     void select (int car); // -1 — ничего не выбрано
     int getSelected() const noexcept { return selected; }
@@ -114,6 +118,7 @@ private:
     int selected = -1, hovered = -1;
     float time = 0.0f, scroll = 0.0f, camX, camU = 0.0f;
     float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
+    float viewWidth = static_cast<float> (width), viewSmooth = viewWidth, centreX = viewWidth * 0.5f;
     double lastTick = 0.0;
     int laneChanges = 0, yields = 0;
     int hiddenMask = 0; // копия маски из состояния на этот кадр

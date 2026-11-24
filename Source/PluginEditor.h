@@ -28,13 +28,38 @@ struct Box final : juce::Component
     juce::Image image = RoadView::image ("panel_png");
 };
 
-// Машина в гараже: нажата — едет по дороге, отжата — скрыта.
-struct CarChip final : juce::Button
+// Гараж: все машины списком. Сверху вниз — порядок цепочки эффектов, меняется перетаскиванием;
+// тумблер справа — едет машина по дороге или стоит в гараже; клик по строке открывает машину на дороге.
+class GaragePanel final : public juce::Component
 {
-    CarChip() : juce::Button ({}) { setClickingTogglesState (true); }
-    void paintButton (juce::Graphics&, bool over, bool down) override;
-    const RoadView* road = nullptr;
-    int car = 0;
+public:
+    GaragePanel (GentraAudioProcessor&, RoadView&);
+    static constexpr int width = 312;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    juce::ImageButton close;
+
+private:
+    juce::Rectangle<float> rowBounds (int slot) const;
+    juce::Rectangle<float> toggleBounds (juce::Rectangle<float> row) const;
+    int slotAt (float y) const;
+
+    GentraAudioProcessor& processor;
+    RoadView& road;
+    juce::Image image = RoadView::image ("panel_png");
+    GentraAudioProcessor::CarOrder dragOrder {}; // порядок во время перетаскивания; в процессор — по отпусканию
+    int dragCar = -1, hoverSlot = -1;
+    float dragY = 0.0f, grab = 0.0f; // верх перетаскиваемой строки и где за неё взялись
+    bool dragging = false;
+    mutable std::array<float, RoadView::numCars> shownY {}; // строки доезжают до своих мест (рисуется 60 раз в секунду вместе с дорогой)
+    mutable bool placed = false;
 };
 
 class GentraAudioProcessorEditor final : public juce::AudioProcessorEditor
@@ -48,7 +73,7 @@ public:
     // Для теста: прокрутить анимацию и открыть машину без окна.
     void advance (float dt) { road.advance (dt); }
     void select (int car) { road.select (car); }
-    void openGarage() { showGarage (true); }
+    void openGarage() { showGarage (true, false); }
 
     // Общие настройки пользователя (масштаб окна); тест подменяет файл, чтобы не трогать настоящий.
     static juce::File settingsFile;
@@ -63,9 +88,11 @@ private:
     };
 
     void showPopup (int car);
-    void showGarage (bool);
+    void showGarage (bool show, bool animate = true);
     void layoutContent();
     void placePopup (int numRows);
+    static juce::Rectangle<int> garageArea (bool open);
+    int popupRows = 3;
 
     GentraAudioProcessor& gentraProcessor;
     juce::PropertiesFile settings { settingsFile, settingsOptions() };
@@ -84,10 +111,8 @@ private:
 
     // Гараж: какие машины на дороге.
     juce::TextButton garageButton;
-    Box garage;
-    juce::Label garageTitle;
-    juce::ImageButton garageClose;
-    std::array<CarChip, RoadView::numCars> chips;
+    GaragePanel garage;
+    bool garageOpen = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GentraAudioProcessorEditor)
 };

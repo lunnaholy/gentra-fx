@@ -85,23 +85,6 @@ juce::Font BoxLook::getTextButtonFont (juce::TextButton&, int)
     return RoadView::font (17.0f);
 }
 
-void CarChip::paintButton (juce::Graphics& g, bool over, bool down)
-{
-    auto r = getLocalBounds().toFloat();
-    if (over || down)
-    {
-        g.setColour (juce::Colours::black.withAlpha (down ? 0.18f : 0.09f));
-        g.fillRoundedRectangle (r, 6.0f);
-    }
-    const bool shown = getToggleState();
-    const auto label = r.removeFromBottom (18.0f);
-    if (road != nullptr)
-        road->drawThumbnail (g, car, r.reduced (6.0f, 3.0f), shown ? 1.0f : 0.22f);
-    g.setColour (juce::Colours::black.withAlpha (shown ? 1.0f : 0.35f));
-    g.setFont (RoadView::font (15.0f));
-    g.drawText (RoadView::effectName (car), label, juce::Justification::centred);
-}
-
 constexpr int thumbHalf = 12; // ручка ~24×22; ползунок ходит в пределах, где она целиком внутри паза
 
 int BoxLook::getSliderThumbRadius (juce::Slider&)
@@ -136,10 +119,197 @@ void Box::paint (juce::Graphics& g)
     drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
 }
 
+// ---------------- гараж ----------------
+
+namespace
+{
+constexpr float rowsTop = 62.0f, rowStep = 39.0f, rowHeight = 36.0f, rowInset = 16.0f;
+constexpr juce::uint32 ink = 0xff15161a, accent = 0xffe8a23a;
+}
+
+GaragePanel::GaragePanel (GentraAudioProcessor& p, RoadView& r) : processor (p), road (r)
+{
+    close.setTitle (ru ("Закрыть гараж"));
+    addAndMakeVisible (close);
+    setTitle (ru ("Гараж"));
+}
+
+void GaragePanel::resized()
+{
+    close.setBounds (getWidth() - 24 - 36, 14, 36, 30);
+}
+
+juce::Rectangle<float> GaragePanel::rowBounds (int slot) const
+{
+    return { rowInset, rowsTop + rowStep * static_cast<float> (slot), static_cast<float> (getWidth()) - 2.0f * rowInset, rowHeight };
+}
+
+juce::Rectangle<float> GaragePanel::toggleBounds (juce::Rectangle<float> row) const
+{
+    return { row.getRight() - 46.0f, row.getCentreY() - 9.0f, 36.0f, 18.0f };
+}
+
+int GaragePanel::slotAt (float y) const
+{
+    const int slot = static_cast<int> (std::floor ((y - rowsTop) / rowStep));
+    return slot >= 0 && slot < RoadView::numCars ? slot : -1;
+}
+
+void GaragePanel::paint (juce::Graphics& g)
+{
+    g.setOpacity (1.0f);
+    drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
+
+    g.setColour (juce::Colour (ink));
+    g.setFont (RoadView::font (28.0f));
+    g.drawText (ru ("Гараж"), 26, 12, 200, 32, juce::Justification::centredLeft);
+    g.setColour (juce::Colour (ink).withAlpha (0.6f));
+    g.setFont (RoadView::font (14.0f));
+    g.drawText (ru ("Сверху вниз — порядок эффектов"), 26, 40, 220, 16, juce::Justification::centredLeft);
+
+    const auto order = dragCar >= 0 ? dragOrder : processor.getCarOrder();
+    for (int slot = 0; slot < RoadView::numCars; ++slot)
+    {
+        auto& y = shownY[static_cast<size_t> (order[static_cast<size_t> (slot)])];
+        const float target = rowBounds (slot).getY();
+        y = placed ? y + (target - y) * 0.3f : target;
+    }
+    placed = true;
+
+    const auto drawRow = [&] (int slot, int car, float y, bool lifted)
+    {
+        const auto r = rowBounds (slot).withY (y);
+        const bool hidden = road.isHidden (car), working = RoadView::isWorking (car);
+        if (lifted)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.3f));
+            g.fillRoundedRectangle (r.translated (0.0f, 3.0f), 6.0f);
+        }
+        g.setColour (juce::Colours::white.withAlpha (lifted ? 0.85f : slot == hoverSlot ? 0.45f : 0.3f));
+        g.fillRoundedRectangle (r, 6.0f);
+        if (road.getSelected() == car) // открытая на дороге
+        {
+            g.setColour (juce::Colour (accent).withAlpha (0.45f));
+            g.fillRoundedRectangle (r, 6.0f);
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.2f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+
+        // Ручка перетаскивания: 2 × 3 точки.
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        for (int i = 0; i < 6; ++i)
+            g.fillEllipse (r.getX() + 8.0f + 5.0f * static_cast<float> (i % 2), r.getCentreY() - 7.5f + 5.0f * static_cast<float> (i / 2), 3.0f, 3.0f);
+
+        road.drawThumbnail (g, car, { r.getX() + 22.0f, r.getY() + 4.0f, 74.0f, r.getHeight() - 7.0f }, hidden ? 0.3f : 1.0f);
+
+        const auto toggle = toggleBounds (r);
+        const float textX = r.getX() + 104.0f, textW = toggle.getX() - 6.0f - textX;
+        g.setColour (juce::Colour (ink).withAlpha (hidden ? 0.45f : 1.0f));
+        g.setFont (RoadView::font (17.0f));
+        g.drawText (RoadView::effectName (car), juce::Rectangle<float> (textX, r.getY() + 2.0f, textW, 18.0f), juce::Justification::centredLeft);
+        g.setColour (juce::Colour (ink).withAlpha (hidden ? 0.35f : 0.6f));
+        g.setFont (RoadView::font (13.5f));
+        g.drawText (RoadView::carModel (car) + (working ? juce::String() : ru (" · скоро")),
+                    juce::Rectangle<float> (textX, r.getY() + 19.0f, textW, 15.0f), juce::Justification::centredLeft);
+
+        // Тумблер «на дороге»: зелёный, как «ВКЛ» у таблички.
+        g.setColour (hidden ? juce::Colours::black.withAlpha (0.25f) : juce::Colour (0xff57c22e));
+        g.fillRoundedRectangle (toggle, toggle.getHeight() * 0.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.drawRoundedRectangle (toggle, toggle.getHeight() * 0.5f, 1.0f);
+        const float d = toggle.getHeight() - 4.0f;
+        g.setColour (juce::Colours::white);
+        g.fillEllipse (hidden ? toggle.getX() + 2.0f : toggle.getRight() - 2.0f - d, toggle.getY() + 2.0f, d, d);
+    };
+
+    int liftedSlot = -1;
+    for (int slot = 0; slot < RoadView::numCars; ++slot)
+    {
+        const int car = order[static_cast<size_t> (slot)];
+        if (dragging && car == dragCar)
+            liftedSlot = slot;
+        else
+            drawRow (slot, car, shownY[static_cast<size_t> (car)], false);
+    }
+    if (liftedSlot >= 0) // перетаскиваемая — поверх остальных
+        drawRow (liftedSlot, dragCar, dragY, true);
+}
+
+void GaragePanel::mouseMove (const juce::MouseEvent& e)
+{
+    const int slot = slotAt (e.position.y);
+    const bool onRow = slot >= 0 && rowBounds (slot).contains (e.position);
+    const bool onToggle = onRow && toggleBounds (rowBounds (slot)).contains (e.position);
+    hoverSlot = onRow ? slot : -1;
+    setMouseCursor (onToggle ? juce::MouseCursor::PointingHandCursor
+                    : onRow  ? juce::MouseCursor::DraggingHandCursor
+                             : juce::MouseCursor::NormalCursor);
+}
+
+void GaragePanel::mouseExit (const juce::MouseEvent&)
+{
+    hoverSlot = -1;
+}
+
+void GaragePanel::mouseDown (const juce::MouseEvent& e)
+{
+    const int slot = slotAt (e.position.y);
+    if (slot < 0 || ! rowBounds (slot).contains (e.position))
+        return;
+    const auto order = processor.getCarOrder();
+    const int car = order[static_cast<size_t> (slot)];
+    if (toggleBounds (rowBounds (slot)).contains (e.position))
+    {
+        road.setHidden (car, ! road.isHidden (car));
+        repaint();
+        return;
+    }
+    dragCar = car;
+    dragOrder = order;
+    dragY = rowBounds (slot).getY();
+    grab = e.position.y - dragY;
+    dragging = false;
+}
+
+void GaragePanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragCar < 0 || (! dragging && e.getDistanceFromDragStart() < 4))
+        return;
+    dragging = true;
+    dragY = juce::jlimit (rowBounds (0).getY(), rowBounds (RoadView::numCars - 1).getY(), e.position.y - grab);
+
+    // Перетаскиваемая встаёт в ближайшее место, остальные сдвигаются.
+    const auto from = std::find (dragOrder.begin(), dragOrder.end(), dragCar);
+    const auto to = dragOrder.begin() + juce::roundToInt ((dragY - rowsTop) / rowStep);
+    if (from < to)
+        std::rotate (from, from + 1, to + 1);
+    else if (to < from)
+        std::rotate (to, from, from + 1);
+    repaint();
+}
+
+void GaragePanel::mouseUp (const juce::MouseEvent&)
+{
+    if (dragCar < 0)
+        return;
+    if (dragging)
+    {
+        shownY[static_cast<size_t> (dragCar)] = dragY; // доезжает до места от точки, где отпустили
+        if (dragOrder != processor.getCarOrder())
+            processor.setCarOrder (dragOrder);
+    }
+    else if (RoadView::isWorking (dragCar) && ! road.isHidden (dragCar)) // просто клик — открыть на дороге
+        road.select (road.getSelected() == dragCar ? -1 : dragCar);
+    dragCar = -1;
+    dragging = false;
+    repaint();
+}
+
 // ---------------- редактор ----------------
 
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
-    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); })
+    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); }),
+      garage (p, road)
 {
     setLookAndFeel (&look);
     addAndMakeVisible (content);
@@ -180,30 +350,16 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     }
     content.addChildComponent (popup);
 
-    // Гараж: кнопка в углу открывает табличку со всеми машинами; клик по машине — скрыть/вернуть.
+    // Гараж: кнопка в углу выдвигает панель справа; закрытая панель ждёт за правым краем.
     garageButton.setButtonText (ru ("Гараж"));
     garageButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     garageButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-    garageButton.onClick = [this] { showGarage (! garage.isVisible()); };
+    garageButton.onClick = [this] { showGarage (! garageOpen); };
     content.addAndMakeVisible (garageButton);
 
-    garageTitle.setText (ru ("Гараж — кто едет по дороге"), juce::dontSendNotification);
-    garageTitle.setFont (RoadView::font (19.0f));
-    garage.addAndMakeVisible (garageTitle);
-    garageClose.setImages (false, true, true, close, 1.0f, {}, close, 1.0f, shade, close, 1.0f, juce::Colours::black.withAlpha (0.3f));
-    garageClose.setTitle (ru ("Закрыть гараж"));
-    garageClose.onClick = [this] { showGarage (false); };
-    garage.addAndMakeVisible (garageClose);
-    for (int i = 0; i < RoadView::numCars; ++i)
-    {
-        auto& chip = chips[static_cast<size_t> (i)];
-        chip.road = &road;
-        chip.car = i;
-        chip.setTitle (RoadView::effectName (i));
-        chip.onClick = [this, i] { road.setHidden (i, ! chips[static_cast<size_t> (i)].getToggleState()); };
-        garage.addAndMakeVisible (chip);
-    }
-    content.addChildComponent (garage);
+    garage.close.setImages (false, true, true, close, 1.0f, {}, close, 1.0f, shade, close, 1.0f, juce::Colours::black.withAlpha (0.3f));
+    garage.close.onClick = [this] { showGarage (false); };
+    content.addAndMakeVisible (garage);
     layoutContent();
 
     // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер один на все проекты —
@@ -256,22 +412,24 @@ void GentraAudioProcessorEditor::layoutContent()
     garageButton.setBounds (RoadView::width - 8 - 96, 8, 96, 34);
     rotate (garageButton, 1.2f);
 
-    // 3 × 4 машины по 110×58.
-    constexpr int gw = 404, gh = 316, cw = 110, ch = 58, gap = 6;
-    garage.setBounds ((RoadView::width - gw) / 2, (RoadView::height - gh) / 2, gw, gh);
-    garageTitle.setBounds (30, 12, 300, 30);
-    garageClose.setBounds (gw - 35 - 36, 12, 36, 30);
-    for (int i = 0; i < RoadView::numCars; ++i)
-        chips[static_cast<size_t> (i)].setBounds ((gw - 3 * cw - 2 * gap) / 2 + (i % 3) * (cw + gap), 50 + (i / 3) * (ch + 4), cw, ch);
+    garage.setBounds (garageArea (garageOpen));
+}
+
+juce::Rectangle<int> GentraAudioProcessorEditor::garageArea (bool open)
+{
+    return { open ? RoadView::width - 8 - GaragePanel::width : RoadView::width + 4, 8, GaragePanel::width, RoadView::height - 16 };
 }
 
 // Табличка под число строк доп. параметров: у машины с одним параметром она ниже, без пустой строки.
 void GentraAudioProcessorEditor::placePopup (int numRows)
 {
+    popupRows = numRows;
     popup.setTransform ({});
+    // По центру открытой части дороги (гараж справа её сужает).
+    const int free = garageOpen ? garageArea (true).getX() : RoadView::width;
     // Пропорции при двух строках — как у panel.png (760×213); винты в углах, поэтому поля по 34.
     const int h = 58 + numRows * 24;
-    popup.setBounds ((RoadView::width - 380) / 2, RoadView::height - 8 - h, 380, h);
+    popup.setBounds ((free - 380) / 2, RoadView::height - 8 - h, 380, h);
     onButton.setBounds (34, 12, 151, 30);
     syncButton.setBounds (196, 13, 104, 28);
     closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
@@ -285,11 +443,15 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     rotate (popup, -0.6f);
 }
 
-void GentraAudioProcessorEditor::showGarage (bool show)
+void GentraAudioProcessorEditor::showGarage (bool show, bool animate)
 {
-    for (int i = 0; i < RoadView::numCars; ++i) // маска могла смениться из пресета
-        chips[static_cast<size_t> (i)].setToggleState (! road.isHidden (i), juce::dontSendNotification);
-    garage.setVisible (show);
+    garageOpen = show;
+    road.setVisibleWidth (static_cast<float> (show ? garageArea (true).getX() : RoadView::width));
+    if (animate)
+        juce::Desktop::getInstance().getAnimator().animateComponent (&garage, garageArea (show), 1.0f, 260, false, 1.0, 0.0);
+    else
+        garage.setBounds (garageArea (show));
+    placePopup (popupRows);
 }
 
 void GentraAudioProcessorEditor::showPopup (int car)
