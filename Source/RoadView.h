@@ -51,6 +51,7 @@ public:
     float closestGap() const; // минимальная дистанция между машинами в одной полосе
     float getRumble() const noexcept { return rumble; } // сила тряски в этом кадре, 0..1
     int flashingCars() const; // сколько машин сейчас моргают дальним
+    int getYields() const noexcept { return yields; } // сколько раз уступили моргающему
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -66,6 +67,7 @@ private:
     {
         float x = 0.0f, lp = 0.0f, ve = 0.3f, cool = 0.0f, spin = 0.0f;
         float waiting = 0.0f; // сколько секунд упирается в медленного и не может объехать
+        float pushSpeed = 0.0f; // сзади моргают дальним: скорость моргающего (0 — нет), надо уступить
         float px = 0.0f, py = 0.0f, sc = 1.0f; // положение на экране без учёта камеры
         int lane = 0;
     };
@@ -75,9 +77,10 @@ private:
     float param (const char* id) const;
     bool isOn (int car) const;
     float strength (int car) const;
-    bool laneFree (int car, int lane) const;
+    bool laneFree (int car, int lane, float squeeze = 1.0f) const; // squeeze < 1 — втиснуться плотнее
     float room (int car, int lane) const;
     void weave (int car);
+    bool yieldLane (int car);
     void place();
 
     juce::Point<float> toScreen (float worldX, float worldY) const;
@@ -105,7 +108,7 @@ private:
     float time = 0.0f, scroll = 0.0f, camX, camU = 0.0f;
     float focus = 0.0f, zoom = 1.0f, zoomGoal = 1.0f, focusY, centreY, lastFocusY;
     double lastTick = 0.0;
-    int laneChanges = 0;
+    int laneChanges = 0, yields = 0;
     int hiddenMask = 0; // копия маски из состояния на этот кадр
     bool hidden (int car) const noexcept { return (hiddenMask >> car) & 1; }
     float rumble = 0.0f;            // сила тряски в этом кадре

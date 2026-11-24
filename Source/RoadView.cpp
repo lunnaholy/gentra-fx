@@ -28,6 +28,11 @@ constexpr float shakePx = 8.0f, shakeRelease = 0.12f;
 constexpr float beatHold = 0.6f, weakBeat = 0.6f;
 // Застрявший за медленным моргает дальним: через сколько секунд ожидания и сколько вспышек в секунду.
 constexpr float flashDelay = 0.4f, flashRate = 14.0f;
+// Моргает только быстрый (желаемая скорость от fastSpeed) и только тому, кто медленнее на flashMargin;
+// тот уступает, а если некуда — разгоняется до скорости моргающего плюс yieldBoost.
+constexpr float fastSpeed = 0.35f, flashMargin = 0.1f, yieldBoost = 0.05f;
+// Уступающий втискивается плотнее обычного: доля от mergeFront/mergeBack.
+constexpr float yieldSqueeze = 0.85f;
 // =======================================================================
 
 constexpr float W = static_cast<float> (RoadView::width);
@@ -251,7 +256,7 @@ void RoadView::select (int car)
 
 // Можно ли встать в полосу прямо сейчас: спереди и сзади есть место, с запасом на разницу скоростей
 // (быстрая машина сзади или медленная спереди съедят зазор за время перестроения).
-bool RoadView::laneFree (int car, int lane) const
+bool RoadView::laneFree (int car, int lane, float squeeze) const
 {
     const auto& c = cars[static_cast<size_t> (car)];
     for (size_t o = 0; o < cars.size(); ++o)
@@ -261,7 +266,7 @@ bool RoadView::laneFree (int car, int lane) const
             continue;
         const float closing = (q.ve - c.ve) * flowSpeed * laneChangeTime; // > 0 — сближаемся сзади
         const float d = ahead (c.x, q.x);
-        if (d < mergeFront - juce::jmin (0.0f, closing) || d > span - mergeBack - juce::jmax (0.0f, closing))
+        if (d < mergeFront * squeeze - juce::jmin (0.0f, closing) || d > span - mergeBack * squeeze - juce::jmax (0.0f, closing))
             return false;
     }
     return true;
@@ -323,6 +328,26 @@ int RoadView::flashingCars() const
     return n;
 }
 
+// Уступить моргающему: соседняя свободная полоса, где просторнее, или обочина; false — некуда.
+bool RoadView::yieldLane (int car)
+{
+    auto& c = cars[static_cast<size_t> (car)];
+    const int top = selected >= 0 ? lanes - 2 : lanes - 1;
+    int best = -1;
+    for (int lane : { c.lane - 1, c.lane + 1 })
+        if (lane >= 0 && lane <= top && laneFree (car, lane, yieldSqueeze) && (best < 0 || room (car, lane) > room (car, best)))
+            best = lane;
+    if (best < 0 && c.lane == lanes - 1 && laneFree (car, shoulder, yieldSqueeze))
+        best = shoulder; // из ближней можно прижаться к обочине — потом вернётся сама
+    if (best < 0)
+        return false;
+    c.lane = best;
+    c.cool = laneChangeTime;
+    ++laneChanges;
+    ++yields;
+    return true;
+}
+
 float RoadView::closestGap() const
 {
     float gap = span;
@@ -358,6 +383,9 @@ void RoadView::advance (float dt)
         const float s = strength (i);
         float target = on ? 0.2f + s : 0.06f;
         c.cool -= dt;
+        const float pushSpeed = c.pushSpeed; // сзади моргают дальним: желаемая скорость моргающего (0 — нет)
+        const bool pushed = pushSpeed > 0.0f;
+        c.pushSpeed = 0.0f;
 
         int blocker = -1;
         float dist = 1.0e9f;
@@ -374,10 +402,17 @@ void RoadView::advance (float dt)
         }
         const bool close = blocker >= 0 && dist < carLen * 1.5f;
 
-        // Упёрся в медленного и не может объехать — копит «ожидание» (моргает дальним, см. drawCar).
-        const bool waiting = on && i != selected && c.lane != shoulder && close
-                             && cars[static_cast<size_t> (blocker)].ve < target - 0.02f;
+        // Быстрый упёрся в заметно более медленного и не может объехать — копит «ожидание»,
+        // потом моргает дальним (см. drawCar), и передний обязан уступить.
+        const bool waiting = on && i != selected && c.lane != shoulder && close && target >= fastSpeed
+                             && blocker != selected // открытая занята своим перестроением
+                             && cars[static_cast<size_t> (blocker)].ve < target - flashMargin;
         c.waiting = waiting ? c.waiting + dt : 0.0f;
+        if (c.waiting > flashDelay)
+        {
+            auto& q = cars[static_cast<size_t> (blocker)];
+            q.pushSpeed = juce::jmax (q.pushSpeed, target);
+        }
 
         if (i == selected)
         {
@@ -392,6 +427,8 @@ void RoadView::advance (float dt)
         {
             if (c.lane != shoulder && laneFree (i, shoulder))
                 c.lane = shoulder; // выключенная — на обочину
+            else if (pushed && (c.cool > 0.0f || ! yieldLane (i)))
+                target = juce::jmax (target, pushSpeed + yieldBoost); // не пускают на обочину, а сзади моргают — уступает как все
         }
         else if (c.lane == shoulder)
         {
@@ -409,9 +446,22 @@ void RoadView::advance (float dt)
             else if (laneFree (i, shoulder)) // а если некуда — уходит на обочину
                 c.lane = shoulder;
         }
+        else if (pushed)
+        {
+            // Моргают сзади: уйти в любую свободную соседнюю полосу, а если некуда — газануть и искать просвет.
+            if (c.cool > 0.0f || ! yieldLane (i))
+                target = juce::jmax (target, pushSpeed + yieldBoost);
+        }
         else if (c.cool <= 0.0f)
         {
             weave (i);
+        }
+
+        // Уступающий сам упёрся в кого-то — передаёт «уступи» дальше по цепочке, до медленного лидера.
+        if (pushed && close && blocker != selected)
+        {
+            auto& q = cars[static_cast<size_t> (blocker)];
+            q.pushSpeed = juce::jmax (q.pushSpeed, pushSpeed);
         }
 
         // Догнал — едет со скоростью переднего; ближе дистанции — отстаёт, пока зазор не восстановится.

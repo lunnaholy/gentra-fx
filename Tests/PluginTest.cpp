@@ -240,8 +240,9 @@ void traffic()
         std::printf ("traffic car %d: %d lane changes, closest %.0f px\n", car, road.getLaneChanges(), gap);
         CHECK (road.getLaneChanges() >= 10);
         CHECK (gap > 100.0f);
-        std::printf ("traffic car %d: someone flashing %.0f%% of the time\n", car, 100.0 * flashFrames / 3600.0);
-        CHECK (flashFrames > 0 && flashFrames < 3600); // застревают иногда, но не всё время
+        std::printf ("traffic car %d: someone flashing %.0f%% of the time, %d yields\n", car, 100.0 * flashFrames / 3600.0, road.getYields());
+        CHECK (flashFrames > 0 && flashFrames < 3600 / 2); // моргают иногда — только быстрые
+        CHECK (road.getYields() > 0);                     // и им уступают
     }
 }
 
