@@ -79,7 +79,7 @@ private:
     juce::ImageButton onButton, closeButton;
     juce::TextButton syncButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
-    std::array<Row, 2> rows;
+    std::array<Row, 3> rows; // до трёх доп. параметров; табличка — под их число
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 
     // Гараж: какие машины на дороге.

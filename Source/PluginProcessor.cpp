@@ -46,7 +46,7 @@ void GentraAudioProcessor::Stage::skip (int numSamples) noexcept
 bool GentraAudioProcessor::Stage::active() const noexcept
 {
     bool hasEffect = aliveMask == 0;
-    for (int i : { main, extraA, extraB })
+    for (int i : { main, extraA, extraB, extraC })
         if ((aliveMask >> i) & 1)
         {
             if (value[static_cast<size_t> (i)].isSmoothing())
@@ -67,7 +67,8 @@ GentraAudioProcessor::GentraAudioProcessor()
       rust (makeStage ("lores", 0.01f, "loresBits", 1.0f, "loresRate", 1000.0f, "loresMix", "loresOn", Stage::keep (Stage::main))),
       red (makeStage ("drive", 0.01f, "distTone", 0.01f, nullptr, 0.0f, "distMix", "distOn", Stage::keep (Stage::main))),
       white (makeStage ("eqVolume", 1.0f, "eqLow", 1.0f, "eqHigh", 1.0f, "eqMix", "eqOn",
-                        Stage::keep (Stage::main) | Stage::keep (Stage::extraA) | Stage::keep (Stage::extraB))),
+                        Stage::keep (Stage::main) | Stage::keep (Stage::extraA) | Stage::keep (Stage::extraB) | Stage::keep (Stage::extraC),
+                        "eqMid", 1.0f)),
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayTimeParam (apvts.getParameter ("delayTime"))
@@ -76,12 +77,13 @@ GentraAudioProcessor::GentraAudioProcessor()
 
 GentraAudioProcessor::Stage GentraAudioProcessor::makeStage (const char* mainId, float mainScale, const char* aId, float aScale,
                                                              const char* bId, float bScale,
-                                                             const char* mixId, const char* onId, int aliveMask)
+                                                             const char* mixId, const char* onId, int aliveMask,
+                                                             const char* cId, float cScale)
 {
+    const auto raw = [this] (const char* id) { return id != nullptr ? apvts.getRawParameterValue (id) : nullptr; };
     Stage s;
-    s.raw = { apvts.getRawParameterValue (mainId), apvts.getRawParameterValue (aId),
-              bId != nullptr ? apvts.getRawParameterValue (bId) : nullptr, apvts.getRawParameterValue (mixId) };
-    s.scale = { mainScale, aScale, bScale, 0.01f };
+    s.raw = { raw (mainId), raw (aId), raw (bId), raw (cId), raw (mixId) };
+    s.scale = { mainScale, aScale, bScale, cScale, 0.01f };
     s.on = apvts.getRawParameterValue (onId);
     s.aliveMask = aliveMask;
     return s;
@@ -145,6 +147,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
 
         std::make_unique<Float> (juce::ParameterID { "eqVolume", 3 }, "EQ Volume", decibels, 0.0f, dB),
         std::make_unique<Float> (juce::ParameterID { "eqLow", 3 }, "EQ Low", decibels, 0.0f, dB),
+        std::make_unique<Float> (juce::ParameterID { "eqMid", 3 }, "EQ Mid", decibels, 0.0f, dB),
         std::make_unique<Float> (juce::ParameterID { "eqHigh", 3 }, "EQ High", decibels, 0.0f, dB),
         std::make_unique<Float> (juce::ParameterID { "eqMix", 3 }, "EQ Mix", percent, 100.0f, pct),
         std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "eqOn", 3 }, "EQ On", true),
@@ -376,8 +379,9 @@ void GentraAudioProcessor::processEqAndDelay (juce::AudioBuffer<float>& buffer, 
             const float volume = white.next (Stage::main);
             const float low = white.next (Stage::extraA);
             const float high = white.next (Stage::extraB);
+            const float mid = white.next (Stage::extraC);
             const float wet = white.next (Stage::wet);
-            eq.setParams (volume, low, high);
+            eq.setParams (volume, low, mid, high);
 
             for (int ch = 0; ch < numChannels; ++ch)
             {

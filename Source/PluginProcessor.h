@@ -44,15 +44,15 @@ public:
     bool beatNow (double& beatInBar, double& bpm) const noexcept;
 
 private:
-    // Сглаженные параметры одной машины: главная ручка, два доп. параметра, итоговый wet (Mix с учётом вкл/выкл).
+    // Сглаженные параметры одной машины: главная ручка, до трёх доп. параметров, итоговый wet (Mix с учётом вкл/выкл).
     struct Stage
     {
-        enum Index { main, extraA, extraB, wet, count };
+        enum Index { main, extraA, extraB, extraC, wet, count };
 
         std::array<std::atomic<float>*, count> raw {}; // для wet — параметр Mix
         std::array<float, count> scale {};
         std::atomic<float>* on = nullptr;
-        int aliveMask = 0; // какие из main/extraA/extraB, отличные от нуля, значат «есть эффект»; 0 — есть всегда
+        int aliveMask = 0; // какие из main/extraA/extraB/extraC, отличные от нуля, значат «есть эффект»; 0 — есть всегда
         static constexpr int keep (int index) { return 1 << index; }
         std::array<juce::SmoothedValue<float>, count> value;
 
@@ -67,7 +67,7 @@ private:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     Stage makeStage (const char* mainId, float mainScale, const char* aId, float aScale, const char* bId, float bScale,
-                     const char* mixId, const char* onId, int aliveMask);
+                     const char* mixId, const char* onId, int aliveMask, const char* cId = nullptr, float cScale = 0.0f);
 
     void processDrive (juce::AudioBuffer<float>&, int numChannels) noexcept;
     void processEqAndDelay (juce::AudioBuffer<float>&, int numChannels) noexcept;

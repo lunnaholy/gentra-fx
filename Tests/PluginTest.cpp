@@ -303,6 +303,13 @@ void equalizer (double sampleRate)
     const double highBoost = gainAt (10000.0), highLeavesBottom = gainAt (50.0);
     setParam (p, "eqLow", -12.0f);
     const double lowCut = gainAt (50.0);
+    setParam (p, "eqLow", 0.0f);
+    setParam (p, "eqHigh", 0.0f);
+    setParam (p, "eqMid", 12.0f);
+    const double midBoost = gainAt (1000.0), midLeavesBottom = gainAt (50.0), midLeavesTop = gainAt (15000.0);
+    std::printf ("eq %.0f Hz: mid +12 -> 1 kHz %+.1f dB, 50 Hz %+.1f dB, 15 kHz %+.1f dB\n", sampleRate, midBoost, midLeavesBottom, midLeavesTop);
+    CHECK (midBoost > 11.5 && std::abs (midLeavesBottom) < 0.5 && std::abs (midLeavesTop) < 0.5);
+    setParam (p, "eqMid", 0.0f);
     std::printf ("eq %.0f Hz: low +12 -> 50 Hz %+.1f dB, 10 kHz %+.1f dB; high +12 -> 10 kHz %+.1f dB, 50 Hz %+.1f dB; low -12 -> %+.1f dB\n",
                  sampleRate, lowBoost, lowLeavesTop, highBoost, highLeavesBottom, lowCut);
     CHECK (lowBoost > 10.5 && std::abs (lowLeavesTop) < 0.3);
@@ -317,8 +324,6 @@ void equalizer (double sampleRate)
     settle (p, sampleRate, rng);
     CHECK (transparent (p, rng));
     setParam (p, "eqOn", 1.0f);
-    setParam (p, "eqLow", 0.0f);
-    setParam (p, "eqHigh", 0.0f);
     settle (p, sampleRate, rng);
     CHECK (transparent (p, rng));
 }
@@ -440,7 +445,7 @@ void automation (double sampleRate)
     const auto any = [&] (const char* id) { auto* q = p.apvts.getParameter (id); q->setValueNotifyingHost (rng.nextFloat()); };
     for (int i = 0; i < 300; ++i)
     {
-        for (auto id : { "eqVolume", "eqLow", "eqHigh", "eqMix", "delayTime", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
+        for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
             any (id);
         setParam (p, "delayOn", rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
@@ -654,6 +659,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "drive", percent);
     setParam (p, "eqVolume", (percent - 50.0f) * 0.24f); // −12…+12 дБ по шкале 0–100
     setParam (p, "eqHigh", 4.5f);
+    setParam (p, "eqMid", 2.0f);
     setParam (p, "eqLow", -3.0f);
     setParam (p, "delayOn", percent > 0.0f ? 1.0f : 0.0f);
     setParam (p, "delayFeedback", 0.9f * percent);

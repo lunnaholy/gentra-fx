@@ -211,7 +211,7 @@ float RoadView::strength (int car) const
     if (car == red)
         return param ("drive") * 0.01f * param ("distMix") * 0.01f;
     if (car == white) // насколько далеко от нуля самая выкрученная ручка
-        return juce::jmax (std::abs (param ("eqVolume")), std::abs (param ("eqLow")), std::abs (param ("eqHigh"))) / 12.0f
+        return std::max ({ std::abs (param ("eqVolume")), std::abs (param ("eqLow")), std::abs (param ("eqMid")), std::abs (param ("eqHigh")) }) / 12.0f
                * param ("eqMix") * 0.01f;
     if (car == silver)
         return param ("delayMix") * 0.01f * (0.5f + 0.5f * param ("delayFeedback") / 90.0f);
