@@ -70,46 +70,44 @@ struct CarInfo
     const char* name;
     const char* model; // подпись в гараже
     juce::uint32 colour;
-    bool on;        // для декоративных
-    float strength; // для декоративных: сила «эффекта» = скорость
     Geo geo = stock;
 };
 
 // Порядок и значения — как в прототипе.
 const std::array<CarInfo, RoadView::numCars> carInfo { {
-    { "car_black_png", "Саб и тонировка", "Gentra", 0xff1b1c21, true, 0.0f },
+    { "car_black_png", "Саб и тонировка", "Gentra", 0xff1b1c21 },
     // Приора
-    { "car_rust_png", "Low-res", "Приора", 0xffb7a688, true, 0.0f,
+    { "car_rust_png", "Low-res", "Приора", 0xffb7a688,
       { 0.2171f, 0.8121f, 0.0813f, 0.0814f, { 0.94f, 0.2f }, { 0.04f, 0.215f }, { 0.73f, 0.193f }, { 0.05f, 0.105f } } },
     // Жигули
-    { "car_red_png", "Дисторшн", "Жигули", 0xffb3202a, true, 0.2475f,
+    { "car_red_png", "Дисторшн", "Жигули", 0xffb3202a,
       { 0.2277f, 0.8369f, 0.0825f, 0.0823f, { 0.978f, 0.198f }, { 0.018f, 0.2f }, { 0.937f, 0.208f }, { 0.05f, 0.085f } } },
     // BYD Seagull: повторитель в зеркале
-    { "car_green_png", "Тормоз ленты", "BYD Seagull", 0xff1f8a3b, false, 0.0f,
+    { "car_green_png", "Тормоз ленты", "BYD Seagull", 0xff1f8a3b,
       { 0.1619f, 0.8181f, 0.0959f, 0.0957f, { 0.93f, 0.222f }, { 0.07f, 0.305f }, { 0.635f, 0.29f }, { 0.04f, 0.1f } } },
     // Дамас, белый (был оранжевым): повторитель у передней стойки
-    { "car_orange_png", "Автопанорама", "Дамас", 0xffe8eaec, false, 0.0f,
+    { "car_orange_png", "Автопанорама", "Дамас", 0xffe8eaec,
       { 0.1956f, 0.7833f, 0.0923f, 0.0923f, { 0.98f, 0.23f }, { 0.022f, 0.26f }, { 0.558f, 0.355f }, { 0.04f, 0.11f } } },
     // Спарк, салатовый (был фиолетовым)
-    { "car_purple_png", "Сайдчейн", "Спарк", 0xff93c02e, true, 0.35f,
+    { "car_purple_png", "Сайдчейн", "Спарк", 0xff93c02e,
       { 0.1566f, 0.8265f, 0.098f, 0.098f, { 0.923f, 0.249f }, { 0.059f, 0.298f }, { 0.734f, 0.22f }, { 0.04f, 0.12f } } },
     // Hongqi E-QM5, чёрный (был синим): повторитель в зеркале
-    { "car_blue_png", "Хорус", "Hongqi E-QM5", 0xff15161a, true, 0.128f,
+    { "car_blue_png", "Хорус", "Hongqi E-QM5", 0xff15161a,
       { 0.2026f, 0.8118f, 0.0806f, 0.0805f, { 0.955f, 0.16f }, { 0.05f, 0.2f }, { 0.665f, 0.24f }, { 0.04f, 0.07f } } },
     // Лисян: повторитель в зеркале
-    { "car_pink_png", "Фэйзер", "Лисян", 0xffff5fa2, false, 0.0f,
+    { "car_pink_png", "Фэйзер", "Лисян", 0xffff5fa2,
       { 0.216f, 0.8189f, 0.0888f, 0.0889f, { 0.95f, 0.205f }, { 0.06f, 0.25f }, { 0.665f, 0.255f }, { 0.04f, 0.1f } } },
     // BYD Song Plus: повторитель в зеркале
-    { "car_silver_png", "Дилей", "BYD Song Plus", 0xffa3acb6, true, 0.15f,
+    { "car_silver_png", "Дилей", "BYD Song Plus", 0xffa3acb6,
       { 0.2124f, 0.814f, 0.0883f, 0.0882f, { 0.94f, 0.2f }, { 0.06f, 0.25f }, { 0.67f, 0.27f }, { 0.04f, 0.1f } } },
     // BYD Yuan Up: повторитель в зеркале
-    { "car_grey_png", "Реверб", "BYD Yuan Up", 0xff4d545c, true, 0.165f,
+    { "car_grey_png", "Реверб", "BYD Yuan Up", 0xff4d545c,
       { 0.1928f, 0.8344f, 0.0916f, 0.0914f, { 0.95f, 0.225f }, { 0.05f, 0.25f }, { 0.675f, 0.3f }, { 0.04f, 0.1f } } },
     // Zeekr 007: повторитель в зеркале
-    { "car_yellow_png", "Гейт", "Zeekr 007", 0xfff2c230, false, 0.0f,
+    { "car_yellow_png", "Гейт", "Zeekr 007", 0xfff2c230,
       { 0.2024f, 0.8086f, 0.0873f, 0.0872f, { 0.94f, 0.186f }, { 0.06f, 0.212f }, { 0.645f, 0.232f }, { 0.05f, 0.09f } } },
     // Нексия
-    { "car_white_png", "Эквалайзер", "Нексия", 0xffeef0f2, true, 0.1667f,
+    { "car_white_png", "Эквалайзер", "Нексия", 0xffeef0f2,
       { 0.2234f, 0.8154f, 0.0796f, 0.0796f, { 0.947f, 0.183f }, { 0.038f, 0.205f }, { 0.737f, 0.197f }, { 0.05f, 0.1f } } },
 } };
 
@@ -139,8 +137,8 @@ juce::Image asset (const char* name) { return RoadView::image (name); }
 
 const juce::Identifier hiddenId { "hiddenCars" };   // битовая маска скрытых машин в состоянии плагина
 const juce::Identifier hiddenOffId { "hiddenOff" }; // какие из них были выключены до скрытия
-// Все 12 в ширину экрана — тесно, быстрые моргают треть времени. По умолчанию в гараже — машины эффектов,
-// до которых дальше всего по бэклогу; с ними моргание ~5–7% времени.
+// Все 12 в ширину экрана — тесно, быстрые моргают треть времени. По умолчанию три машины в гараже (UI-11),
+// с ними моргание ~5–7% времени.
 constexpr int defaultHidden = (1 << green) | (1 << orange) | (1 << purple);
 
 float posMod (float a, float n)
@@ -258,8 +256,7 @@ float RoadView::param (const char* id) const
 
 bool RoadView::isOn (int car) const
 {
-    return isWorking (car) ? param (working[static_cast<size_t> (car)].on) > 0.5f
-                            : carInfo[static_cast<size_t> (car)].on;
+    return isWorking (car) && param (working[static_cast<size_t> (car)].on) > 0.5f;
 }
 
 float RoadView::strength (int car) const
@@ -291,7 +288,7 @@ float RoadView::strength (int car) const
         return param ("tapeAmount") * 0.01f * param ("tapeMix") * 0.01f;
     if (car == orange)
         return juce::jmax (param ("panDepth"), std::abs (param ("panWidth"))) * 0.01f * param ("panMix") * 0.01f;
-    return carInfo[static_cast<size_t> (car)].strength;
+    return 0.0f;
 }
 
 // Машина целиком (кузов и колёса) в рамке area: нос вправо, колёса на нижней кромке.
@@ -1090,9 +1087,7 @@ void RoadView::drawOverlays (juce::Graphics& g) const
     if (tagCar >= 0)
     {
         const auto& c = cars[static_cast<size_t> (tagCar)];
-        auto text = effectName (tagCar);
-        if (! isWorking (tagCar))
-            text << ru (" · скоро");
+        const auto text = effectName (tagCar);
 
         const auto f = font (17.0f);
         const float th = 30.0f, tw = juce::GlyphArrangement::getStringWidth (f, text) + 40.0f;

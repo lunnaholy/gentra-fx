@@ -405,7 +405,7 @@ void GaragePanel::paint (juce::Graphics& g)
     const auto drawRow = [&] (int slot, int car, float y, bool lifted)
     {
         const auto r = rowBounds (slot).withY (y);
-        const bool hidden = road.isHidden (car), working = RoadView::isWorking (car);
+        const bool hidden = road.isHidden (car);
         if (lifted)
         {
             g.setColour (juce::Colours::black.withAlpha (0.3f));
@@ -435,7 +435,7 @@ void GaragePanel::paint (juce::Graphics& g)
         g.drawText (RoadView::effectName (car), juce::Rectangle<float> (textX, r.getY() + 2.0f, textW, 18.0f), juce::Justification::centredLeft);
         g.setColour (juce::Colour (ink).withAlpha (hidden ? 0.35f : 0.6f));
         g.setFont (RoadView::font (13.5f));
-        g.drawText (RoadView::carModel (car) + (working ? juce::String() : ru (" · скоро")),
+        g.drawText (RoadView::carModel (car),
                     juce::Rectangle<float> (textX, r.getY() + 19.0f, textW, 15.0f), juce::Justification::centredLeft);
 
         // Тумблер «на дороге»: зелёный, как «ВКЛ» у таблички.

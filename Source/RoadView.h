@@ -5,8 +5,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-// Дорога с машинами — порт HTML-прототипа. Рабочие эффекты — машины из RoadView::working:
-// клик по машине приближает камеру, и её колёса становятся ручками. Остальные едут декоративным потоком.
+// Дорога с машинами — порт HTML-прототипа. Каждая машина — эффект из RoadView::working:
+// клик по машине приближает камеру, и её колёса становятся ручками.
 class RoadView final : public juce::Component,
                        private juce::Timer
 {
@@ -14,7 +14,7 @@ public:
     static constexpr int numCars = 12;
     static constexpr int width = 900, height = 560;
 
-    // Рабочая машина — эффект; у декоративной main == nullptr. Индекс — номер машины (как в маске гаража).
+    // Машина-эффект. Индекс — номер машины (как в маске гаража).
     struct Working
     {
         const char* main = nullptr;  // параметр заднего колеса
