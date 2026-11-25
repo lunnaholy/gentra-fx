@@ -159,13 +159,11 @@ void Box::paint (juce::Graphics& g)
 namespace
 {
 // Ссылки окна «О плагине». Пустой адрес — заглушка: строка видна, но не кликается.
-const std::array<std::pair<const char*, const char*>, 4> aboutLinks { {
+const std::array<std::pair<const char*, const char*>, 2> aboutLinks { {
     { "официальный сайт", "https://sauce.emeel.fyi/gentra-fx" },
-    { "telegram", "" },
-    { "youtube", "" },
-    { "github", "" },
+    { "telegram", "https://t.me/lnhly" },
 } };
-constexpr int aboutW = 440, aboutH = 400;
+constexpr int aboutW = 440, aboutH = 340;
 constexpr juce::uint32 aboutInk = 0xff15161a;
 
 // Наклейка «DOLBIT NORMAL'NO»: белое на чёрном. Нарисована в рамке 560×210 и вписана в area.
@@ -258,7 +256,7 @@ void AboutBox::paint (juce::Graphics& g)
     line ("Sauce Gentra FX", 34.0f, 26.0f, 1.0f);
     line (ru ("версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
     line (ru ("воой акя бу малибу ики турбоми??"), 17.0f, 90.0f, 0.85f);
-    drawSticker (g, { p.getCentreX() - 80.0f, p.getY() + 252.0f, 160.0f, 64.0f });
+    drawSticker (g, { p.getCentreX() - 80.0f, p.getY() + 192.0f, 160.0f, 64.0f });
     line (ru ("© 2026 lunnaholy"), 18.0f, p.getHeight() - 76.0f, 1.0f);
     line (ru ("шрифт pt sans narrow — paratype free font license. сделано на juce."), 12.5f, p.getHeight() - 50.0f, 0.55f);
 }
