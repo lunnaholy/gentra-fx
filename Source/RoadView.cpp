@@ -85,7 +85,7 @@ const std::array<CarInfo, RoadView::numCars> carInfo { {
     { "car_red_png", "Дисторшн", "Жигули", 0xffb3202a, true, 0.2475f,
       { 0.2277f, 0.8369f, 0.0825f, 0.0823f, { 0.978f, 0.198f }, { 0.018f, 0.2f }, { 0.937f, 0.208f }, { 0.05f, 0.085f } } },
     // BYD Seagull: повторитель в зеркале
-    { "car_green_png", "Питчер", "BYD Seagull", 0xff1f8a3b, false, 0.0f,
+    { "car_green_png", "Тормоз ленты", "BYD Seagull", 0xff1f8a3b, false, 0.0f,
       { 0.1619f, 0.8181f, 0.0959f, 0.0957f, { 0.93f, 0.222f }, { 0.07f, 0.305f }, { 0.635f, 0.29f }, { 0.04f, 0.1f } } },
     // Дамас, белый (был оранжевым): повторитель у передней стойки
     { "car_orange_png", "Форманта", "Дамас", 0xffe8eaec, false, 0.0f,
@@ -197,6 +197,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
     w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
     w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
+    w[green] = { "tapeAmount", "ТОРМОЗ", "%", 0, false, "tapeMix", "tapeOn" };
     return w;
 }();
 
@@ -285,6 +286,8 @@ float RoadView::strength (int car) const
         return param ("sidechainDepth") * 0.01f * param ("sidechainMix") * 0.01f;
     if (car == yellow)
         return param ("gateDepth") * 0.01f * param ("gateMix") * 0.01f;
+    if (car == green)
+        return param ("tapeAmount") * 0.01f * param ("tapeMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -476,6 +479,8 @@ void RoadView::advance (float dt)
         const bool on = isOn (i);
         const float s = strength (i);
         float target = on ? 0.2f + s : 0.06f;
+        if (i == green)
+            target *= 1.0f - 0.8f * level (green); // лента тормозит — и машина
         c.cool -= dt;
         const float pushSpeed = c.pushSpeed; // сзади моргают дальним: желаемая скорость моргающего (0 — нет)
         const bool pushed = pushSpeed > 0.0f;
@@ -1021,7 +1026,9 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.fillEllipse (x - r, y - r, 2.0f * r, 2.0f * r);
     };
     glow (k.head.x, k.head.y, i == white && on ? 0.12f + 0.06f * strength (white) : 0.09f, rgba (255, 240, 180, 0.55f));
-    glow (k.tail.x, k.tail.y, 0.06f, rgba (255, 40, 40, 0.5f));
+    // Лента тормозит — горят стоп-сигналы.
+    const float braking = i == green ? level (green) : 0.0f;
+    glow (k.tail.x, k.tail.y, 0.06f + 0.1f * braking, rgba (255, 40, 40, 0.5f + 0.5f * braking));
 
     // Ждёт, пока уступят, — стробит дальним: чистый белый, огромный ореол и луч.
     if (c.waiting > flashDelay && std::fmod (time * flashRate, 1.0f) < 0.5f)

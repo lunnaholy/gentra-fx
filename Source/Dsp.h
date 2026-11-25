@@ -61,6 +61,25 @@ inline double sidechainDuck (double phase, double stepSeconds, double shape) noe
     return std::min (1.0, phase * stepSeconds / sidechainAttackSeconds) * std::pow (1.0 - phase, k);
 }
 
+// Остановка ленты: как часто — длительность цикла в четвертях (параметр «Каждые» — индекс в этом списке).
+constexpr int numTapeCycles = 4;
+constexpr std::array<double, numTapeCycles> tapeCycleBeats { 2.0, 4.0, 8.0, 16.0 };
+constexpr std::array<const char*, numTapeCycles> tapeCycleNames { "1/2", "1 такт", "2 такта", "4 такта" };
+constexpr int defaultTapeCycle = 1;
+constexpr double tapeMaxSeconds = 10.0;      // линия: насколько лента успевает отстать (тормоз в полцикла 4 тактов при 50 BPM)
+constexpr double tapeMinSpinSeconds = 0.005; // разгон не короче — без щелчка после остановки
+constexpr double tapeCatchUpSeconds = 0.02;  // после разгона лента отстаёт — переход на живой вход за это время
+
+// Скорость ленты на фазе цикла 0..1: в конце цикла (последние brake) тормозит 1 → 0, в начале (первые spin) разгоняется 0 → 1.
+inline double tapeSpeed (double phase, double brake, double spin) noexcept
+{
+    if (brake > 0.0 && phase >= 1.0 - brake)
+        return std::max (0.0, (1.0 - phase) / brake);
+    if (spin > 0.0 && phase < spin)
+        return phase / spin;
+    return 1.0;
+}
+
 constexpr double gateMinRampSeconds = 0.001; // фронт гейта при Плавности 0 — без щелчка
 constexpr int defaultGateDivision = 9;       // 1/16
 
@@ -519,5 +538,75 @@ private:
     float feedback = 0.0f, lastTone = -1.0f;
     Biquad tone;
     int countdown = 0;
+};
+// Зелёная машина: лента, которая тормозит и разгоняется. Головка чтения едет со скоростью speed, запись — всегда 1,
+// поэтому при торможении лента отстаёт (lag растёт) и звук опускается вниз по высоте; громкость гаснет у самой остановки.
+// Разогнавшись, лента отстаёт на половину разгона — за tapeCatchUpSeconds плавно переходим на живой вход.
+class TapeStop
+{
+public:
+    // Единственное место, где выделяется память, — до запуска звука.
+    void prepare (double sampleRate)
+    {
+        fs = sampleRate;
+        size = static_cast<int> (std::ceil (tapeMaxSeconds * fs)) + 8;
+        for (auto& l : line)
+            l.assign (static_cast<size_t> (size), 0.0f);
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        for (auto& l : line)
+            std::fill (l.begin(), l.end(), 0.0f);
+        write = 0;
+        lag = 0.0;
+        tape = 0.0f;
+        gain = 1.0f;
+    }
+
+    // Раз в сэмпл-фрейм, до processSample.
+    void setSpeed (double speed) noexcept
+    {
+        if (speed < 1.0)
+        {
+            lag = std::min (lag + 1.0 - speed, static_cast<double> (size - 4));
+            tape = 1.0f; // слышна только лента
+        }
+        else if (tape > 0.0f)
+        {
+            tape = std::max (0.0f, tape - static_cast<float> (1.0 / (tapeCatchUpSeconds * fs)));
+            if (tape <= 0.0f)
+                lag = 0.0; // догнали живой вход
+        }
+        gain = static_cast<float> (std::min (1.0, speed * 8.0)); // гаснет на последних ~12% скорости
+    }
+
+    float processSample (int channel, float x) noexcept
+    {
+        auto& l = line[static_cast<size_t> (channel)];
+        l[static_cast<size_t> (write)] = x;
+        if (tape <= 0.0f)
+            return x;
+
+        const double pos = static_cast<double> (write) - lag;
+        const double whole = std::floor (pos);
+        const auto frac = static_cast<float> (pos - whole);
+        const auto at = [&] (int i) { return l[static_cast<size_t> (i < 0 ? i + size : i)]; };
+        const int i = static_cast<int> (whole);
+        const float played = gain * (at (i) + frac * (at (i + 1 >= size ? i + 1 - size : i + 1) - at (i)));
+        return x + tape * (played - x);
+    }
+
+    // После всех каналов фрейма.
+    void advance() noexcept { write = write + 1 < size ? write + 1 : 0; }
+
+private:
+    double fs = 44100.0;
+    std::array<std::vector<float>, maxChannels> line;
+    int size = 0, write = 0;
+    double lag = 0.0;
+    float tape = 0.0f; // доля ленты в выходе: 1 — тормоз и разгон, дальше спадает к живому входу
+    float gain = 1.0f;
 };
 } // namespace gentra

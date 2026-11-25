@@ -104,10 +104,13 @@ private:
     // ponytail: провал ~20 мс вместо настоящего кроссфейда (тот требует второй копии всех стадий).
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> chainGain;
 
-    Stage black, rust, red, white, silver, blue, pink, grey, purple, yellow;
+    Stage black, rust, red, white, silver, blue, pink, grey, purple, yellow, green;
     std::atomic<float>* sidechainNote; // индекс в gentra::delayDivisionNames
     std::atomic<float>* gateNote;
-    std::atomic<float> duckLevel { 0.0f }, gateLevel { 0.0f };
+    std::atomic<float>* tapeCycle; // индекс в gentra::tapeCycleNames
+    std::atomic<float> duckLevel { 0.0f }, gateLevel { 0.0f }, tapeLevel { 0.0f };
+    gentra::TapeStop tape;
+    void processTape (juce::AudioBuffer<float>&, int numChannels) noexcept;
     // Позиция в четвертях: с хоста, пока он играет, иначе бежит сама по последнему темпу.
     double ppqNow = 0.0;
     // Блоки JUCE готовятся на 2 канала и всегда получают стерео-копию (моно — дублируется): их ассерты требуют

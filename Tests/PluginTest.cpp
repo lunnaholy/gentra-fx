@@ -528,8 +528,9 @@ void reverbCar (double sampleRate)
     CHECK (p.getTailLengthSeconds() <= 0.0);
 }
 
-// Постоянные 0.5 в течение seconds блоками по 512; если хост играет, его ppq идёт вместе с блоками. Выход канала 0.
-std::vector<float> stepRun (GentraAudioProcessor& p, FakeHead& head, double sampleRate, double seconds)
+// Постоянные 0.5 (или синус freq с амплитудой 0.5) в течение seconds блоками по 512; если хост играет, его ppq идёт
+// вместе с блоками. Выход канала 0.
+std::vector<float> stepRun (GentraAudioProcessor& p, FakeHead& head, double sampleRate, double seconds, double freq = 0.0)
 {
     juce::MidiBuffer midi;
     std::vector<float> out;
@@ -538,8 +539,13 @@ std::vector<float> stepRun (GentraAudioProcessor& p, FakeHead& head, double samp
     {
         if (head.info.getIsPlaying())
             head.info.setPpqPosition (static_cast<double> (out.size()) / sampleRate * 2.0); // 120 BPM — 2 четверти в секунду
-        for (int ch = 0; ch < 2; ++ch)
-            juce::FloatVectorOperations::fill (buf.getWritePointer (ch), 0.5f, 512);
+        for (int n = 0; n < 512; ++n)
+        {
+            const double t = static_cast<double> (out.size() + static_cast<size_t> (n)) / sampleRate;
+            const auto x = freq > 0.0 ? 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * freq * t)) : 0.5f;
+            for (int ch = 0; ch < 2; ++ch)
+                buf.setSample (ch, n, x);
+        }
         p.processBlock (buf, midi);
         CHECK (allFinite (buf));
         out.insert (out.end(), buf.getReadPointer (0), buf.getReadPointer (0) + 512);
@@ -587,6 +593,54 @@ void sidechainCar (double sampleRate)
     p.setPlayHead (nullptr);
 }
 
+// Зелёная: раз в цикл лента тормозит (высота падает, у остановки тишина) и разгоняется, затем звук снова
+// ровно как вход; переходы без щелчков.
+void tapeCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    FakeHead head;
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    p.setPlayHead (&head);
+    CHECK (p.apvts.getParameter ("tapeEvery")->getCurrentValueAsText() == juce::String::fromUTF8 ("1 такт"));
+    setParam (p, "tapeEvery", 0.0f); // 1/2 — цикл 1 с при 120 BPM: тормоз 0.5…1 с, разгон 0…0.15 с
+    setParam (p, "tapeAmount", 100.0f);
+    p.reset();
+
+    const double freq = 1000.0;
+    const auto y = stepRun (p, head, sampleRate, 2.0, freq);
+    const auto index = [&] (double seconds) { return static_cast<size_t> (seconds * sampleRate); };
+    const auto input = [&] (size_t n) { return 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * freq * static_cast<double> (n) / sampleRate)); };
+    const auto sameAsInput = [&] (double from, double to)
+    {
+        for (size_t n = index (from); n < index (to); ++n)
+            if (std::abs (y[n] - input (n)) > 1.0e-6f)
+                return false;
+        return true;
+    };
+    const auto crossings = [&] (double from, double to)
+    {
+        int c = 0;
+        for (size_t n = index (from) + 1; n < index (to); ++n)
+            c += (y[n - 1] < 0.0f) != (y[n] < 0.0f);
+        return c;
+    };
+    float nearStop = 0.0f;
+    for (size_t n = index (0.99); n < index (1.0); ++n)
+        nearStop = juce::jmax (nearStop, std::abs (y[n]));
+    const double pitch = static_cast<double> (crossings (0.55, 0.75)) / crossings (0.25, 0.45);
+    const float natural = 0.5f * static_cast<float> (juce::MathConstants<double>::twoPi * freq / sampleRate);
+    std::printf ("tape %.0f Hz: pitch while braking x%.2f, level before stop %.3f, biggest step %.4f (sine %.4f)\n",
+                 sampleRate, pitch, nearStop, biggestStep (y), natural);
+    CHECK (sameAsInput (0.25, 0.45) && sameAsInput (1.25, 1.45)); // после разгона — снова ровно вход
+    CHECK (pitch < 0.85);
+    CHECK (nearStop < 0.1f);
+    CHECK (biggestStep (y) < 1.5f * natural);
+    p.setPlayHead (nullptr);
+}
+
 // Жёлтая: на 1/16 открыт первую половину шага, закрыт вторую, фронты без щелчков.
 void gateCar (double sampleRate)
 {
@@ -627,9 +681,10 @@ void automation (double sampleRate)
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
                          "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix",
                          "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
-                         "gateDepth", "gateNote", "gateSmooth", "gateMix" })
+                         "gateDepth", "gateNote", "gateSmooth", "gateMix",
+                         "tapeAmount", "tapeEvery", "tapeSpin", "tapeMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -1019,6 +1074,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "reverbSize", percent);
     setParam (p, "sidechainDepth", percent);
     setParam (p, "gateDepth", percent);
+    setParam (p, "tapeAmount", percent);
     {
         // Немного звука, чтобы сайдчейн и гейт были посреди шага (провал виден на машине).
         p.setRateAndBufferSizeDetails (48000.0, 512);
@@ -1034,7 +1090,8 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     CHECK (gentra != nullptr);
     if (car <= -2) // гараж с парой скрытых машин; −3 и дальше — плюс открытая машина −car − 3
     {
-        p.apvts.state.setProperty ("hiddenCars", (1 << 3) | (1 << 7), nullptr);
+        const int open = car <= -3 ? -car - 3 : -1; // открытую не прячем
+        p.apvts.state.setProperty ("hiddenCars", ((1 << 3) | (1 << 7)) & ~(open >= 0 ? 1 << open : 0), nullptr);
         gentra->openGarage();
         if (car <= -3)
             gentra->select (-car - 3);
@@ -1075,6 +1132,8 @@ int main (int argc, char** argv)
         sidechainCar (sampleRate);
         effectCar (sampleRate, "gateDepth", "gateMix", "gateOn");
         gateCar (sampleRate);
+        effectCar (sampleRate, "tapeAmount", "tapeMix", "tapeOn");
+        tapeCar (sampleRate);
         automation (sampleRate);
         chainOrder (sampleRate);
     }

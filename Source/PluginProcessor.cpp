@@ -75,8 +75,10 @@ GentraAudioProcessor::GentraAudioProcessor()
       grey (makeStage ("reverbSize", 0.01f, "reverbDamping", 0.01f, nullptr, 0.0f, "reverbMix", "reverbOn", Stage::keep (Stage::main))),
       purple (makeStage ("sidechainDepth", 0.01f, "sidechainShape", 0.01f, nullptr, 0.0f, "sidechainMix", "sidechainOn", Stage::keep (Stage::main))),
       yellow (makeStage ("gateDepth", 0.01f, "gateSmooth", 0.01f, nullptr, 0.0f, "gateMix", "gateOn", Stage::keep (Stage::main))),
+      green (makeStage ("tapeAmount", 0.01f, "tapeSpin", 0.01f, nullptr, 0.0f, "tapeMix", "tapeOn", Stage::keep (Stage::main))),
       sidechainNote (apvts.getRawParameterValue ("sidechainNote")),
       gateNote (apvts.getRawParameterValue ("gateNote")),
+      tapeCycle (apvts.getRawParameterValue ("tapeEvery")),
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
@@ -131,6 +133,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::StringArray notes;
     for (const auto* name : gentra::delayDivisionNames)
         notes.add (name);
+    juce::StringArray tapeCycles;
+    for (const auto* name : gentra::tapeCycleNames)
+        tapeCycles.add (juce::String::fromUTF8 (name));
 
     // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом,
     // 3 — красная, белая и серебряная машины, 4 — синяя, розовая, серая, фиолетовая и жёлтая,
@@ -211,7 +216,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "eqLowFreq", 5 }, "EQ Low Freq", skewed (30.0f, 1000.0f, 150.0f, 1.0f), 200.0f, hz),
         std::make_unique<Float> (juce::ParameterID { "eqMidFreq", 5 }, "EQ Mid Freq", skewed (150.0f, 8000.0f, 1000.0f, 1.0f), 1000.0f, hz),
         std::make_unique<Float> (juce::ParameterID { "eqHighFreq", 5 }, "EQ High Freq", skewed (1000.0f, 18000.0f, 4000.0f, 1.0f), 4000.0f, hz),
-        std::make_unique<Float> (juce::ParameterID { "eqMidQ", 5 }, "EQ Mid Q", skewed (0.3f, 6.0f, 1.0f, 0.01f), 0.7f)
+        std::make_unique<Float> (juce::ParameterID { "eqMidQ", 5 }, "EQ Mid Q", skewed (0.3f, 6.0f, 1.0f, 0.01f), 0.7f),
+
+        std::make_unique<Float> (juce::ParameterID { "tapeAmount", 5 }, "Tape Stop", percent, 0.0f, pct),
+        std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "tapeEvery", 5 }, "Tape Stop Every", tapeCycles, gentra::defaultTapeCycle),
+        std::make_unique<Float> (juce::ParameterID { "tapeSpin", 5 }, "Tape Spin Up", percent, 30.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "tapeMix", 5 }, "Tape Mix", percent, 100.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "tapeOn", 5 }, "Tape On", true)
     };
     return layout;
 }
@@ -248,6 +259,8 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     grey.prepare (sampleRate);
     purple.prepare (sampleRate);
     yellow.prepare (sampleRate);
+    green.prepare (sampleRate);
+    tape.prepare (sampleRate);
     reverb.setSampleRate (sampleRate);
     preDelay.prepare (spec);
     preDelay.setMaximumDelayInSamples (static_cast<int> (std::ceil (gentra::reverbPreDelayMaxSeconds * sampleRate)) + 1);
@@ -282,6 +295,8 @@ void GentraAudioProcessor::reset()
     grey.snap();
     purple.snap();
     yellow.snap();
+    green.snap();
+    tape.reset();
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
 }
@@ -344,6 +359,7 @@ float GentraAudioProcessor::effectLevel (int car) const noexcept
 {
     return car == gentra::car::purple ? duckLevel.load (std::memory_order_relaxed)
          : car == gentra::car::yellow ? gateLevel.load (std::memory_order_relaxed)
+         : car == gentra::car::green  ? tapeLevel.load (std::memory_order_relaxed)
                                       : 0.0f;
 }
 
@@ -422,8 +438,46 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
             processStepGain (yellow, gateNote, gateLevel, buffer, numChannels,
                              [] (double phase, double stepSeconds, float smooth) { return 1.0 - gentra::gateOpen (phase, stepSeconds, smooth); });
             break;
+        case gentra::car::green: processTape (buffer, numChannels); break;
         default: break;
     }
+}
+
+// Цикл — по позиции хоста (без транспорта бежит сам): в конце цикла лента тормозит, в начале следующего разгоняется.
+void GentraAudioProcessor::processTape (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    green.updateTargets();
+    if (! green.active() || getSampleRate() <= 0.0)
+    {
+        tape.reset();
+        green.skip (buffer.getNumSamples());
+        tapeLevel.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    const double bpm = hostBpm.load (std::memory_order_relaxed);
+    const int cycle = juce::jlimit (0, gentra::numTapeCycles - 1, juce::roundToInt (tapeCycle->load()));
+    const double cycleQuarters = gentra::tapeCycleBeats[static_cast<size_t> (cycle)];
+    const double cycleSeconds = cycleQuarters * 60.0 / bpm;
+    const double quartersPerSample = bpm / 60.0 / getSampleRate();
+    auto* const* data = buffer.getArrayOfWritePointers();
+    double speed = 1.0;
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const double brake = 0.5 * green.next (Stage::main); // тормоз — до половины цикла
+        const double spin = juce::jmax (gentra::tapeMinSpinSeconds / cycleSeconds, brake * green.next (Stage::extraA));
+        const float wet = green.next (Stage::wet);
+        const double cycles = (ppqNow + n * quartersPerSample) / cycleQuarters;
+        speed = gentra::tapeSpeed (cycles - std::floor (cycles), brake, spin);
+        tape.setSpeed (speed);
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float x = data[ch][n];
+            data[ch][n] = x + wet * (tape.processSample (ch, x) - x);
+        }
+        tape.advance();
+    }
+    tapeLevel.store (static_cast<float> (1.0 - speed), std::memory_order_relaxed);
 }
 
 template <typename Shape>
@@ -803,7 +857,7 @@ void GentraAudioProcessor::storeChain (const CarOrder& order) noexcept
     namespace c = gentra::car;
     constexpr int sounding = (1 << c::black) | (1 << c::rustCar) | (1 << c::red) | (1 << c::white) | (1 << c::silver) | (1 << c::blue)
                             | (1 << c::pink) | (1 << c::grey) | (1 << c::purple)
-                            | (1 << c::yellow);
+                            | (1 << c::yellow) | (1 << c::green);
     std::uint64_t packed = 0;
     int shift = 0;
     for (int car : order)
