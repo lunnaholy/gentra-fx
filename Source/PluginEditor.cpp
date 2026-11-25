@@ -169,7 +169,7 @@ void AboutBox::resized()
     const auto p = panel();
     close.setBounds (p.getRight() - 34 - 36, p.getY() + 16, 36, 30);
     for (size_t i = 0; i < links.size(); ++i)
-        links[i]->setBounds (p.getX() + 60, p.getY() + 122 + 30 * static_cast<int> (i), aboutW - 120, 26);
+        links[i]->setBounds (p.getX() + 60, p.getY() + 136 + 28 * static_cast<int> (i), aboutW - 120, 26);
 }
 
 void AboutBox::mouseDown (const juce::MouseEvent& e)
@@ -193,7 +193,8 @@ void AboutBox::paint (juce::Graphics& g)
     };
     line ("Sauce Gentra FX", 34.0f, 26.0f, 1.0f);
     line (ru ("Версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
-    line (ru ("12 машин — 12 эффектов. Порядок цепочки — в гараже."), 16.0f, 88.0f, 0.8f);
+    line (ru ("— Вой ака, бу Малибу, икки турбоми?"), 16.0f, 86.0f, 0.85f);
+    line (ru ("— Йўқ, бу Жентра. 12 та машина — 12 та эффект!"), 16.0f, 106.0f, 0.85f);
     line (ru ("© 2026 lunnaholy"), 18.0f, p.getHeight() - 76.0f, 1.0f);
     line (ru ("Шрифт PT Sans Narrow — ParaType Free Font License. Сделано на JUCE."), 12.5f, p.getHeight() - 50.0f, 0.55f);
 }
