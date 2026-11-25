@@ -88,7 +88,7 @@ const std::array<CarInfo, RoadView::numCars> carInfo { {
     { "car_green_png", "Тормоз ленты", "BYD Seagull", 0xff1f8a3b, false, 0.0f,
       { 0.1619f, 0.8181f, 0.0959f, 0.0957f, { 0.93f, 0.222f }, { 0.07f, 0.305f }, { 0.635f, 0.29f }, { 0.04f, 0.1f } } },
     // Дамас, белый (был оранжевым): повторитель у передней стойки
-    { "car_orange_png", "Форманта", "Дамас", 0xffe8eaec, false, 0.0f,
+    { "car_orange_png", "Автопанорама", "Дамас", 0xffe8eaec, false, 0.0f,
       { 0.1956f, 0.7833f, 0.0923f, 0.0923f, { 0.98f, 0.23f }, { 0.022f, 0.26f }, { 0.558f, 0.355f }, { 0.04f, 0.11f } } },
     // Спарк, салатовый (был фиолетовым)
     { "car_purple_png", "Сайдчейн", "Спарк", 0xff93c02e, true, 0.35f,
@@ -198,6 +198,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
     w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
     w[green] = { "tapeAmount", "ТОРМОЗ", "%", 0, false, "tapeMix", "tapeOn" };
+    w[orange] = { "panDepth", "ГЛУБИНА", "%", 0, false, "panMix", "panOn" };
     return w;
 }();
 
@@ -288,6 +289,8 @@ float RoadView::strength (int car) const
         return param ("gateDepth") * 0.01f * param ("gateMix") * 0.01f;
     if (car == green)
         return param ("tapeAmount") * 0.01f * param ("tapeMix") * 0.01f;
+    if (car == orange)
+        return juce::jmax (param ("panDepth"), std::abs (param ("panWidth"))) * 0.01f * param ("panMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -852,7 +855,9 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
 
     juce::Graphics::ScopedSaveState save (g);
     // Дальше всё в единицах машины: x 0..1 от зада к носу, y вверх от асфальта.
-    g.addTransform (juce::AffineTransform::translation (-0.5f, 0.0f).scaled (carLen * c.sc, -carLen * c.sc).translated (px, c.py));
+    // Автопанорама: Дамас качается поперёк полосы — вправо (от нас, вверх по экрану) и влево (к нам).
+    const float sway = i == orange ? 0.04f * carLen * c.sc * level (orange) : 0.0f;
+    g.addTransform (juce::AffineTransform::translation (-0.5f, 0.0f).scaled (carLen * c.sc, -carLen * c.sc).translated (px, c.py - sway));
 
     // Тень
     {
@@ -1053,6 +1058,18 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.setColour (juce::Colour (0xffff9d1c));
         for (auto [s, r] : { std::pair { k.head, 0.018f }, { k.tail, 0.018f }, { k.side, 0.012f } })
             g.fillEllipse (s.x - r, s.y - r, 2.0f * r, 2.0f * r);
+    }
+
+    // Звук ушёл в сторону — мигает поворотник: левый (видимый борт) ярко, правый — отсветом с дальнего борта.
+    if (const float pan = i == orange && on ? level (orange) : 0.0f; std::abs (pan) > 0.35f && std::fmod (time * 3.0f, 1.0f) < 0.5f)
+    {
+        const auto amber = juce::Colour (0xffff9d1c).withAlpha (pan < 0.0f ? 1.0f : 0.45f);
+        for (auto [s, r] : { std::pair { k.head, 0.018f }, { k.tail, 0.018f }, { k.side, 0.012f } })
+        {
+            glow (s.x, s.y, 3.0f * r, amber.withMultipliedAlpha (0.6f));
+            g.setColour (amber);
+            g.fillEllipse (s.x - r, s.y - r, 2.0f * r, 2.0f * r);
+        }
     }
 }
 

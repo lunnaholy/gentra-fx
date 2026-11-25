@@ -641,6 +641,63 @@ void tapeCar (double sampleRate)
     p.setPlayHead (nullptr);
 }
 
+// Оранжевая: пинг-понг на 1/2 перекидывает звук влево и вправо раз в полсекунды без щелчков, ширина сводит
+// стерео в моно или расширяет; моно проходит как есть.
+void panCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    FakeHead head;
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    head.info.setPpqPosition (0.0);
+    p.setPlayHead (&head);
+    juce::MidiBuffer midi;
+    CHECK (p.apvts.getParameter ("panNote")->getCurrentValueAsText() == "1/2");
+    setParam (p, "panShape", 3.0f); // пинг-понг
+    CHECK (p.apvts.getParameter ("panShape")->getCurrentValueAsText() == juce::String::fromUTF8 ("Пинг-понг"));
+    setParam (p, "panDepth", 100.0f);
+    p.reset();
+
+    juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate)); // цикл 1/2 при 120 BPM — 1 с
+    for (int ch = 0; ch < 2; ++ch)
+        juce::FloatVectorOperations::fill (buf.getWritePointer (ch), 0.5f, buf.getNumSamples());
+    p.processBlock (buf, midi);
+    CHECK (allFinite (buf));
+    const auto at = [&] (int ch, double seconds) { return buf.getSample (ch, juce::roundToInt (seconds * sampleRate)); };
+    float worst = 0.0f;
+    for (int ch = 0; ch < 2; ++ch)
+        for (int n = 1; n < buf.getNumSamples(); ++n)
+            worst = juce::jmax (worst, std::abs (buf.getSample (ch, n) - buf.getSample (ch, n - 1)));
+    std::printf ("pan %.0f Hz: 0.25 s L %.3f R %.3f, 0.75 s L %.3f R %.3f, biggest step %.4f\n",
+                 sampleRate, at (0, 0.25), at (1, 0.25), at (0, 0.75), at (1, 0.75), worst);
+    CHECK (std::abs (at (0, 0.25) - 0.707f) < 0.01f && std::abs (at (1, 0.25)) < 0.01f); // слева, постоянная мощность
+    CHECK (std::abs (at (0, 0.75)) < 0.01f && std::abs (at (1, 0.75) - 0.707f) < 0.01f); // справа
+    CHECK (worst < 0.02f);
+
+    // Ширина без движения: −100% — чистый боковой сигнал исчезает, +100% — вдвое громче.
+    setParam (p, "panDepth", 0.0f);
+    for (auto [width, expected] : { std::pair { -100.0f, 0.0f }, { 100.0f, 0.6f } })
+    {
+        setParam (p, "panWidth", width);
+        p.reset();
+        juce::AudioBuffer<float> side (2, 2048);
+        juce::FloatVectorOperations::fill (side.getWritePointer (0), 0.3f, 2048);
+        juce::FloatVectorOperations::fill (side.getWritePointer (1), -0.3f, 2048);
+        p.processBlock (side, midi);
+        CHECK (std::abs (side.getSample (0, 1000) - expected) < 1.0e-4f && std::abs (side.getSample (1, 1000) + expected) < 1.0e-4f);
+    }
+
+    juce::AudioBuffer<float> mono (1, 512), ref;
+    juce::Random rng (2);
+    fillNoise (mono, rng, 0.5f);
+    ref.makeCopyOf (mono);
+    p.processBlock (mono, midi);
+    CHECK (bitExact (mono, ref));
+    p.setPlayHead (nullptr);
+}
+
 // Жёлтая: на 1/16 открыт первую половину шага, закрыт вторую, фронты без щелчков.
 void gateCar (double sampleRate)
 {
@@ -682,9 +739,10 @@ void automation (double sampleRate)
                          "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix",
                          "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
                          "gateDepth", "gateNote", "gateSmooth", "gateMix",
-                         "tapeAmount", "tapeEvery", "tapeSpin", "tapeMix" })
+                         "tapeAmount", "tapeEvery", "tapeSpin", "tapeMix",
+                         "panDepth", "panNote", "panShape", "panWidth", "panMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "panOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -695,7 +753,7 @@ void automation (double sampleRate)
     }
 }
 
-// Порядок цепочки: от него зависит звук, смена — без щелчков, перестановка декоративных машин звук не трогает,
+// Порядок цепочки: от него зависит звук, смена — без щелчков,
 // порядок живёт в пресете, битый — заменяется порядком по умолчанию.
 void chainOrder (double sampleRate)
 {
@@ -758,12 +816,6 @@ void chainOrder (double sampleRate)
         CHECK (worst < 0.06f);
     }
     settle (p, sampleRate, rng);
-    CHECK (transparent (p, rng));
-
-    // Декоративные местами — звук тот же, без провала: прозрачно сразу.
-    auto decor = GentraAudioProcessor::defaultOrder;
-    std::swap (decor[5], decor[6]); // зелёная и оранжевая
-    p.setCarOrder (decor);
     CHECK (transparent (p, rng));
 
     p.setCarOrder (whiteFirst);
@@ -1075,6 +1127,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "sidechainDepth", percent);
     setParam (p, "gateDepth", percent);
     setParam (p, "tapeAmount", percent);
+    setParam (p, "panDepth", percent);
     {
         // Немного звука, чтобы сайдчейн и гейт были посреди шага (провал виден на машине).
         p.setRateAndBufferSizeDetails (48000.0, 512);
@@ -1134,6 +1187,8 @@ int main (int argc, char** argv)
         gateCar (sampleRate);
         effectCar (sampleRate, "tapeAmount", "tapeMix", "tapeOn");
         tapeCar (sampleRate);
+        effectCar (sampleRate, "panDepth", "panMix", "panOn");
+        panCar (sampleRate);
         automation (sampleRate);
         chainOrder (sampleRate);
     }

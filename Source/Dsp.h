@@ -80,6 +80,25 @@ inline double tapeSpeed (double phase, double brake, double spin) noexcept
     return 1.0;
 }
 
+// Автопанорама: форма движения (параметр «Форма» — индекс в этом списке).
+constexpr int numPanShapes = 5;
+constexpr std::array<const char*, numPanShapes> panShapeNames { "Синус", "Треугольник", "Пила", "Пинг-понг", "Случайно" };
+constexpr int defaultPanNote = 18;             // 1/2: туда и обратно за половинную
+constexpr double panSmoothSeconds = 0.004;     // сглаживание положения: пила, пинг-понг и случайная прыгают без щелчков
+
+// Положение −1 (лево) … +1 (право) на фазе цикла 0..1; random — значение случайной формы для этого цикла.
+inline double panLfo (double phase, int shape, double random) noexcept
+{
+    switch (shape)
+    {
+        case 0: return std::sin (2.0 * pi * phase);
+        case 1: return phase < 0.25 ? 4.0 * phase : phase < 0.75 ? 2.0 - 4.0 * phase : 4.0 * phase - 4.0;
+        case 2: return 2.0 * phase - 1.0;
+        case 3: return phase < 0.5 ? -1.0 : 1.0;
+        default: return random;
+    }
+}
+
 constexpr double gateMinRampSeconds = 0.001; // фронт гейта при Плавности 0 — без щелчка
 constexpr int defaultGateDivision = 9;       // 1/16
 
