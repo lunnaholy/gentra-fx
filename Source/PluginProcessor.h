@@ -98,12 +98,14 @@ private:
     // ponytail: провал ~20 мс вместо настоящего кроссфейда (тот требует второй копии всех стадий).
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> chainGain;
 
-    Stage black, rust, red, white, silver, blue, pink;
+    Stage black, rust, red, white, silver, blue, pink, grey;
     // Блоки JUCE готовятся на 2 канала и всегда получают стерео-копию (моно — дублируется): их ассерты требуют
     // ровно столько каналов, сколько при prepare.
     static constexpr int fxChunk = 32;
     juce::dsp::Chorus<float> chorus;
     juce::dsp::Phaser<float> phaser;
+    juce::Reverb reverb;
+    juce::dsp::DelayLine<float> preDelay;
     std::atomic<float>* delaySync;
     std::atomic<float>* delayNote; // индекс в gentra::delayDivisionNames
     std::atomic<double> hostBpm { 120.0 }; // последний темп хоста; без хоста — 120

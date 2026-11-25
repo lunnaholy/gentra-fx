@@ -72,6 +72,7 @@ GentraAudioProcessor::GentraAudioProcessor()
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
       blue (makeStage ("chorusDepth", 0.01f, "chorusRate", 1.0f, "chorusFeedback", 0.01f, "chorusMix", "chorusOn", Stage::keep (Stage::main))),
       pink (makeStage ("phaserDepth", 0.01f, "phaserRate", 1.0f, "phaserFeedback", 0.01f, "phaserMix", "phaserOn", Stage::keep (Stage::main))),
+      grey (makeStage ("reverbSize", 0.01f, "reverbDamping", 0.01f, nullptr, 0.0f, "reverbMix", "reverbOn", Stage::keep (Stage::main))),
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
@@ -175,7 +176,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "phaserRate", 4 }, "Phaser Rate", lfoHz, 0.5f, hz),
         std::make_unique<Float> (juce::ParameterID { "phaserFeedback", 4 }, "Phaser Feedback", feedback, 50.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "phaserMix", 4 }, "Phaser Mix", percent, 50.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "phaserOn", 4 }, "Phaser On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "phaserOn", 4 }, "Phaser On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "reverbSize", 4 }, "Reverb Size", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "reverbDamping", 4 }, "Reverb Damping", percent, 50.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "reverbMix", 4 }, "Reverb Mix", percent, 30.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "reverbOn", 4 }, "Reverb On", true)
     };
     return layout;
 }
@@ -204,6 +210,10 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     pink.prepare (sampleRate);
     phaser.prepare (spec);
     phaser.setMix (1.0f);
+    grey.prepare (sampleRate);
+    reverb.setSampleRate (sampleRate);
+    preDelay.prepare (spec);
+    preDelay.setMaximumDelayInSamples (static_cast<int> (std::ceil (gentra::reverbPreDelayMaxSeconds * sampleRate)) + 1);
     chainGain.reset (sampleRate, 0.01);
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
@@ -220,6 +230,8 @@ void GentraAudioProcessor::reset()
     delay.reset();
     chorus.reset();
     phaser.reset();
+    reverb.reset();
+    preDelay.reset();
     meterLp = 0.0f;
     black.snap();
     rust.snap();
@@ -228,6 +240,7 @@ void GentraAudioProcessor::reset()
     silver.snap();
     blue.snap();
     pink.snap();
+    grey.snap();
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
 }
@@ -319,6 +332,36 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
                                 phaser.process (juce::dsp::ProcessContextReplacing<float> (block));
                             },
                             [this] { phaser.reset(); });
+            break;
+        case gentra::car::grey:
+            processChunked (grey, buffer, numChannels,
+                            [this] (juce::dsp::AudioBlock<float>& block, float size, float damping, float)
+                            {
+                                juce::Reverb::Parameters params;
+                                params.roomSize = size;
+                                params.damping = damping;
+                                params.wetLevel = gentra::reverbWetLevel;
+                                params.dryLevel = 0.0f;
+                                reverb.setParameters (params);
+
+                                // Пре-дилей растёт с размером; меняется раз в кусок — шаг мал, сглаживание ручки его размазывает.
+                                preDelay.setDelay (static_cast<float> (size * gentra::reverbPreDelayMaxSeconds * getSampleRate()));
+                                for (size_t ch = 0; ch < block.getNumChannels(); ++ch)
+                                {
+                                    auto* x = block.getChannelPointer (ch);
+                                    for (size_t i = 0; i < block.getNumSamples(); ++i)
+                                    {
+                                        preDelay.pushSample (static_cast<int> (ch), x[i]);
+                                        x[i] = preDelay.popSample (static_cast<int> (ch));
+                                    }
+                                }
+                                reverb.processStereo (block.getChannelPointer (0), block.getChannelPointer (1), static_cast<int> (block.getNumSamples()));
+                            },
+                            [this]
+                            {
+                                reverb.reset();
+                                preDelay.reset();
+                            });
             break;
         default: break;
     }
@@ -541,15 +584,24 @@ void GentraAudioProcessor::processDelay (juce::AudioBuffer<float>& buffer, int n
 
 double GentraAudioProcessor::getTailLengthSeconds() const
 {
-    // Хвост дилея: пока повторы не затихнут до −60 дБ.
-    if (apvts.getRawParameterValue ("delayOn")->load() < 0.5f || apvts.getRawParameterValue ("delayMix")->load() <= 0.0f)
-        return 0.0;
-    const double seconds = delaySync->load() > 0.5f
-                               ? gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed))
-                               : apvts.getRawParameterValue ("delayTime")->load() * 0.001;
-    const double feedback = apvts.getRawParameterValue ("delayFeedback")->load() * 0.01;
-    const double repeats = feedback > 0.0 ? std::log (0.001) / std::log (feedback) : 0.0;
-    return juce::jmin (gentra::delayMaxSeconds, seconds) * (1.0 + repeats);
+    const auto value = [this] (const char* id) { return static_cast<double> (apvts.getRawParameterValue (id)->load()); };
+    const auto toMinus60 = [] (double feedback) { return feedback > 0.0 ? std::log (0.001) / std::log (feedback) : 0.0; };
+
+    // Дилей: пока повторы не затихнут до −60 дБ.
+    double tail = 0.0;
+    if (value ("delayOn") > 0.5 && value ("delayMix") > 0.0)
+    {
+        const double seconds = delaySync->load() > 0.5f
+                                   ? gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed))
+                                   : value ("delayTime") * 0.001;
+        tail = juce::jmin (gentra::delayMaxSeconds, seconds) * (1.0 + toMinus60 (value ("delayFeedback") * 0.01));
+    }
+
+    // Реверб: самая длинная гребёнка Freeverb (1617 сэмплов при 44.1 кГц) с его обратной связью roomSize·0.28 + 0.7
+    // (константы из juce_Reverb.h) — до −60 дБ, плюс пре-дилей.
+    if (const double size = value ("reverbSize") * 0.01; value ("reverbOn") > 0.5 && value ("reverbMix") > 0.0 && size > 0.0)
+        tail = juce::jmax (tail, size * gentra::reverbPreDelayMaxSeconds + 1617.0 / 44100.0 * toMinus60 (size * 0.28 + 0.7));
+    return tail;
 }
 
 void GentraAudioProcessor::readTransport() noexcept
@@ -647,7 +699,7 @@ void GentraAudioProcessor::storeChain (const CarOrder& order) noexcept
 {
     namespace c = gentra::car;
     constexpr int sounding = (1 << c::black) | (1 << c::rustCar) | (1 << c::red) | (1 << c::white) | (1 << c::silver) | (1 << c::blue)
-                            | (1 << c::pink);
+                            | (1 << c::pink) | (1 << c::grey);
     std::uint64_t packed = 0;
     int shift = 0;
     for (int car : order)

@@ -28,6 +28,8 @@ constexpr double eqMidQ        = 0.7;     // широкий: середина п
 constexpr double eqHighHz      = 4000.0;  // шельф «Верх» эквалайзера
 constexpr double delayMaxSeconds = 4.0;   // длина линии дилея: 1/2 при 30 BPM
 constexpr double delayGlideTau = 0.05;    // постоянная плавной смены времени дилея, с (заметная езда ~0.2 с)
+constexpr double reverbPreDelayMaxSeconds = 0.05; // пре-дилей реверба при размере 100%
+constexpr float  reverbWetLevel = 0.33f;  // громкость хвоста (wetLevel juce::Reverb, его значение по умолчанию)
 
 // Длительности нот для дилея по темпу, в четвертях (параметр «Нота» — индекс в этом списке).
 // По возрастанию: каждая прямая нота, триоль следующей (вдвое длиннее) и она же с точкой.

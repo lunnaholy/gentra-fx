@@ -194,6 +194,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
     w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
     w[pink] = { "phaserDepth", "ГЛУБИНА", "%", 0, false, "phaserMix", "phaserOn" };
+    w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
     return w;
 }();
 
@@ -276,6 +277,8 @@ float RoadView::strength (int car) const
         return param ("chorusDepth") * 0.01f * param ("chorusMix") * 0.01f;
     if (car == pink)
         return param ("phaserDepth") * 0.01f * param ("phaserMix") * 0.01f;
+    if (car == grey)
+        return param ("reverbSize") * 0.01f * param ("reverbMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -913,9 +916,11 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
                             juce::AffineTransform::translation (-0.5f - fn * 0.07f, 0.2f * fn).scaled (1.0f - fn * 0.12f).translated (0.5f, 0.0f));
         }
     }
-    else if (i == grey)
+    else if (i == grey && strength (grey) > 0.0f)
     {
-        drawInCarUnits (g, body, 0.3f * 0.3f * 0.55f, juce::AffineTransform::scale (1.0f, -0.55f));
+        // Отражение на мокром асфальте: длиннее с размером, заметнее с размером и Mix.
+        const float size = param ("reverbSize") * 0.01f;
+        drawInCarUnits (g, body, 0.08f + 0.35f * strength (grey), juce::AffineTransform::scale (1.0f, -(0.3f + 0.4f * size)));
     }
     else if (i == black && blackMix > 0.0f && sub > 0.0f)
     {

@@ -489,6 +489,37 @@ void jucePedal (double sampleRate, const char* main, const char* mix, const char
     CHECK (transparent (p, rng));
 }
 
+// Серая: до пре-дилея тишина, через полсекунды хвост ещё звучит, хост знает длину хвоста.
+void reverbCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::MidiBuffer midi;
+    CHECK (p.getTailLengthSeconds() <= 0.0); // размер 0 — реверба нет
+
+    setParam (p, "reverbSize", 100.0f);
+    setParam (p, "reverbMix", 100.0f);
+    p.reset(); // параметры сразу на месте, реверб пуст
+    juce::AudioBuffer<float> out (2, static_cast<int> (sampleRate * 0.7));
+    out.clear();
+    out.setSample (0, 0, 1.0f);
+    out.setSample (1, 0, 1.0f);
+    p.processBlock (out, midi);
+    CHECK (allFinite (out));
+
+    const int preDelay = static_cast<int> (0.05 * sampleRate) - 1;
+    const int late = static_cast<int> (0.6 * sampleRate);
+    const float early = out.getMagnitude (0, preDelay), tail = out.getMagnitude (late, out.getNumSamples() - late);
+    std::printf ("reverb %.0f Hz: before pre-delay %.2g, at 0.6 s %.4f, host tail %.1f s\n", sampleRate, early, tail, p.getTailLengthSeconds());
+    CHECK (early < 1.0e-6f);
+    CHECK (tail > 1.0e-3f);
+    CHECK (p.getTailLengthSeconds() > 5.0);
+
+    setParam (p, "reverbOn", 0.0f);
+    CHECK (p.getTailLengthSeconds() <= 0.0);
+}
+
 // Случайная автоматизация белой и серебряной (вместе с остальными) и размеры блока: без NaN/Inf и разноса.
 void automation (double sampleRate)
 {
@@ -502,9 +533,9 @@ void automation (double sampleRate)
     {
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
-                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix" })
+                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -650,6 +681,9 @@ void driveClicks (double sampleRate)
 void traffic()
 {
     GentraAudioProcessor p;
+    // Скорость рабочей машины — от силы эффекта; синяя и серая едут, как раньше декоративными (0.128 и 0.165).
+    setParam (p, "chorusDepth", 25.6f);
+    setParam (p, "reverbSize", 55.0f);
     for (int car : { -1, 0 })
     {
         RoadView road (p.apvts, nullptr);
@@ -855,6 +889,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "delayFeedback", 0.9f * percent);
     setParam (p, "chorusDepth", percent);
     setParam (p, "phaserDepth", percent);
+    setParam (p, "reverbSize", percent);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
@@ -896,6 +931,8 @@ int main (int argc, char** argv)
         delayCar (sampleRate);
         jucePedal (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
         jucePedal (sampleRate, "phaserDepth", "phaserMix", "phaserOn");
+        jucePedal (sampleRate, "reverbSize", "reverbMix", "reverbOn");
+        reverbCar (sampleRate);
         automation (sampleRate);
         chainOrder (sampleRate);
     }
