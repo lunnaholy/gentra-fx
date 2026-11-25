@@ -165,8 +165,44 @@ const std::array<std::pair<const char*, const char*>, 4> aboutLinks { {
     { "youtube", "" },
     { "github", "" },
 } };
-constexpr int aboutW = 440, aboutH = 330;
+constexpr int aboutW = 440, aboutH = 400;
 constexpr juce::uint32 aboutInk = 0xff15161a;
+
+// Наклейка «DOLBIT NORMAL'NO»: белое на чёрном. Нарисована в рамке 560×210 и вписана в area.
+void drawSticker (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    g.setColour (juce::Colours::black);
+    g.fillRoundedRectangle (area, 5.0f);
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::RectanglePlacement().getTransformToFit ({ 0.0f, 0.0f, 560.0f, 210.0f }, area.reduced (area.getHeight() * 0.13f)));
+
+    // Два блока с буквами D, смотрящими друг на друга.
+    juce::Path d;
+    d.startNewSubPath (18.0f, 12.0f);
+    d.lineTo (40.0f, 12.0f);
+    d.cubicTo (90.0f, 12.0f, 90.0f, 100.0f, 40.0f, 100.0f);
+    d.lineTo (18.0f, 100.0f);
+    d.closeSubPath();
+    g.setColour (juce::Colours::white);
+    g.fillRect (0.0f, 0.0f, 90.0f, 112.0f);
+    g.fillRect (100.0f, 0.0f, 90.0f, 112.0f);
+    g.setColour (juce::Colours::black);
+    g.fillPath (d);
+    g.fillPath (d, juce::AffineTransform::scale (-1.0f, 1.0f).translated (190.0f, 0.0f));
+
+    // Слово растягивается ровно на ширину рамки, как в оригинале.
+    const auto word = [&] (const juce::String& text, juce::Rectangle<float> r)
+    {
+        const auto font = RoadView::font (r.getHeight() * 1.28f);
+        g.setFont (font.withHorizontalScale (r.getWidth() / juce::GlyphArrangement::getStringWidth (font, text)));
+        g.drawText (text, r.expanded (4.0f, 20.0f), juce::Justification::centred, false);
+    };
+    g.setColour (juce::Colours::white);
+    g.drawRect (juce::Rectangle<float> (212.0f, 0.0f, 348.0f, 112.0f), 9.0f);
+    word ("DOLBIT", { 234.0f, 22.0f, 304.0f, 68.0f });
+    word (ru ("NORMAL\u2019NO"), { 0.0f, 128.0f, 560.0f, 80.0f });
+}
 }
 
 AboutBox::AboutBox()
@@ -222,6 +258,7 @@ void AboutBox::paint (juce::Graphics& g)
     line ("Sauce Gentra FX", 34.0f, 26.0f, 1.0f);
     line (ru ("версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
     line (ru ("воой акя бу малибу ики турбоми??"), 17.0f, 90.0f, 0.85f);
+    drawSticker (g, { p.getCentreX() - 80.0f, p.getY() + 252.0f, 160.0f, 64.0f });
     line (ru ("© 2026 lunnaholy"), 18.0f, p.getHeight() - 76.0f, 1.0f);
     line (ru ("шрифт pt sans narrow — paratype free font license. сделано на juce."), 12.5f, p.getHeight() - 50.0f, 0.55f);
 }
