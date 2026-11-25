@@ -78,5 +78,9 @@ target_link_libraries(SauceGentraFX
 # Кадр интерфейса без DAW: build/GentraTest --snapshot кадр.png [ручки, %] [кадров анимации]
 enable_testing()
 add_executable(GentraTest Tests/PluginTest.cpp)
-target_link_libraries(GentraTest PRIVATE SauceGentraFX juce::juce_audio_utils juce::juce_dsp)
+# JUCE уже собран внутри SauceGentraFX — тест берёт оттуда пути и макросы, а не компилирует все модули второй раз.
+target_link_libraries(GentraTest PRIVATE SauceGentraFX)
+target_include_directories(GentraTest PRIVATE $<TARGET_PROPERTY:SauceGentraFX,INCLUDE_DIRECTORIES>)
+target_compile_definitions(GentraTest PRIVATE $<TARGET_PROPERTY:SauceGentraFX,COMPILE_DEFINITIONS>)
+target_compile_options(GentraTest PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME GentraTest COMMAND GentraTest)

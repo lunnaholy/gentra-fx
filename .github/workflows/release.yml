@@ -18,8 +18,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, name: macOS-arm64 }
-          - { os: windows-latest, name: Windows-x64 }
+          - { os: macos-latest, name: macOS-arm64, jobs: --parallel 4 }
+          # Visual Studio сама компилирует файлы проекта параллельно (/MP в CMakeLists.txt); если собирать параллельно
+          # ещё и проекты, раннеру не хватает памяти.
+          - { os: windows-latest, name: Windows-x64, jobs: '' }
     defaults:
       run:
         shell: bash
@@ -39,7 +41,7 @@ jobs:
       - name: Build
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENTRA_COPY_AFTER_BUILD=OFF ${{ steps.version.outputs.cmake }}
-          cmake --build build --config Release --parallel 4
+          cmake --build build --config Release ${{ matrix.jobs }}
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
