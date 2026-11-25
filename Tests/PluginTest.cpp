@@ -1353,12 +1353,91 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     for (int i = 0; i < frames; ++i)
         gentra->advance (1.0f / 60.0f);
 
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true,
-                                                     static_cast<float> (2.0 / (scale * GentraAudioProcessorEditor::baseScale)));
+    const auto snapshotScale = static_cast<float> (2.0 / (scale * GentraAudioProcessorEditor::baseScale));
+    editor->createComponentSnapshot (editor->getLocalBounds(), true, snapshotScale); // первый кадр готовит копии фона под экран
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, snapshotScale);
     const juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (path));
     file.deleteFile();
     juce::FileOutputStream out (file);
     CHECK (out.openedOk() && juce::PNGImageFormat().writeImageToStream (image, out));
+    return 0;
+}
+
+// --bench: сколько процессора ест звук (доля реального времени одного ядра) и сколько миллисекунд стоит кадр интерфейса.
+int bench()
+{
+    useTempSettings (1.0);
+    constexpr double fs = 48000.0;
+    constexpr int seconds = 10;
+    const char* mains[] { "bass", "lores", "drive", "eqLow", "chorusDepth", "compAmount", "reverbSize", "sidechainDepth", "gateDepth", "panDepth" };
+    const char* ons[] { "bassOn", "loresOn", "distOn", "eqOn", "delayOn", "chorusOn", "compOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "panOn" };
+
+    const auto dsp = [&] (const char* name, const std::function<void (GentraAudioProcessor&)>& setup, int block = 512)
+    {
+        GentraAudioProcessor p;
+        p.setRateAndBufferSizeDetails (fs, block);
+        p.prepareToPlay (fs, block);
+        setup (p);
+        juce::Random rng (1);
+        juce::AudioBuffer<float> noise (2, block), buf (2, block);
+        fillNoise (noise, rng, 0.5f);
+        juce::MidiBuffer midi;
+        const int blocks = static_cast<int> (fs * seconds / block);
+        for (int i = 0; i < 100; ++i) // сглаживание доехало
+        {
+            buf.makeCopyOf (noise, true);
+            p.processBlock (buf, midi);
+        }
+        const double start = juce::Time::getMillisecondCounterHiRes();
+        for (int i = 0; i < blocks; ++i)
+        {
+            buf.makeCopyOf (noise, true);
+            p.processBlock (buf, midi);
+        }
+        const double ms = juce::Time::getMillisecondCounterHiRes() - start;
+        std::printf ("dsp %-22s %6.3f %% of one core\n", name, ms / (seconds * 1000.0) * 100.0);
+    };
+    dsp ("new instance", [] (GentraAudioProcessor&) {});
+    dsp ("all cars off", [&] (GentraAudioProcessor& p) { for (auto* id : ons) setParam (p, id, 0.0f); });
+    dsp ("all cars off, block 32", [&] (GentraAudioProcessor& p) { for (auto* id : ons) setParam (p, id, 0.0f); }, 32);
+    dsp ("new instance, block 32", [] (GentraAudioProcessor&) {}, 32);
+    for (size_t i = 0; i < std::size (mains); ++i)
+        dsp (mains[i], [&] (GentraAudioProcessor& p) { setParam (p, mains[i], mains[i] == std::string ("eqLow") ? 6.0f : 100.0f); });
+    dsp ("delayOn", [] (GentraAudioProcessor& p) { setParam (p, "delayOn", 1.0f); });
+    dsp ("tape braking", [] (GentraAudioProcessor& p) { setParam (p, "tapeBrake", 1.0f); setParam (p, "tapeStopTime", 5000.0f); });
+    dsp ("everything at 100%", [&] (GentraAudioProcessor& p)
+    {
+        for (auto* id : mains) setParam (p, id, id == std::string ("eqLow") ? 6.0f : 100.0f);
+        setParam (p, "delayOn", 1.0f);
+    });
+
+    // Кадр: шаг анимации и отрисовка всего окна в картинку с плотностью Retina.
+    const auto ui = [&] (const char* name, int hiddenMask, int car, bool garage)
+    {
+        GentraAudioProcessor p;
+        p.apvts.state.setProperty ("hiddenCars", hiddenMask, nullptr);
+        for (auto* id : mains) setParam (p, id, id == std::string ("eqLow") ? 6.0f : 60.0f);
+        setParam (p, "delayOn", 1.0f);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+        auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
+        if (garage)
+            gentra->openGarage();
+        gentra->select (car);
+        for (int i = 0; i < 120; ++i)
+            gentra->advance (1.0f / 60.0f);
+        constexpr int frames = 120;
+        const double start = juce::Time::getMillisecondCounterHiRes();
+        for (int i = 0; i < frames; ++i)
+        {
+            gentra->advance (1.0f / 60.0f);
+            editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
+        }
+        std::printf ("ui  %-22s %6.2f ms per frame\n", name, (juce::Time::getMillisecondCounterHiRes() - start) / frames);
+    };
+    ui ("one car", ~1, -1, false);
+    ui ("all cars", 0, -1, false);
+    ui ("all cars, one open", 0, 0, false);
+    ui ("all cars, garage", 0, -1, true);
     return 0;
 }
 }
@@ -1366,6 +1445,9 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    if (argc >= 2 && std::strcmp (argv[1], "--bench") == 0)
+        return bench();
 
     if (argc >= 3 && std::strcmp (argv[1], "--snapshot") == 0)
         return snapshot (argv[2], argc > 3 ? static_cast<float> (std::atof (argv[3])) : 0.0f, argc > 4 ? std::atoi (argv[4]) : 0,
