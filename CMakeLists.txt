@@ -82,6 +82,5 @@ add_executable(GentraTest Tests/PluginTest.cpp)
 target_link_libraries(GentraTest PRIVATE SauceGentraFX)
 target_include_directories(GentraTest PRIVATE $<TARGET_PROPERTY:SauceGentraFX,INCLUDE_DIRECTORIES>)
 target_compile_definitions(GentraTest PRIVATE $<TARGET_PROPERTY:SauceGentraFX,COMPILE_DEFINITIONS>)
-# /Od: оптимизатор MSVC (Visual Studio 2026) падает на этом файле с внутренней ошибкой; тесту скорость не нужна.
-target_compile_options(GentraTest PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8;/Od>)
+target_compile_options(GentraTest PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME GentraTest COMMAND GentraTest)

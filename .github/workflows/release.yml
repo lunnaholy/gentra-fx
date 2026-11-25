@@ -21,6 +21,7 @@ jobs:
           - { os: macos-latest, name: macOS-arm64, jobs: --parallel 4 }
           # Visual Studio сама компилирует файлы проекта параллельно (/MP в CMakeLists.txt); если собирать параллельно
           # ещё и проекты, раннеру не хватает памяти.
+          # windows-2022, а не latest: компилятор Visual Studio 2026 падает с внутренней ошибкой на Tests/PluginTest.cpp.
           - { os: windows-2022, name: Windows-x64, jobs: '' }
     defaults:
       run:
@@ -44,9 +45,6 @@ jobs:
           cmake --build build --config Release --target SauceGentraFX_All ${{ matrix.jobs }}
 
       - name: Test
-        # Компилятор Visual Studio падает с внутренней ошибкой на файле теста — пока разбираемся, Windows-тест
-        # релиз не блокирует; на macOS тест обязателен.
-        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
           cmake --build build --config Release --target GentraTest ${{ matrix.jobs }}
           ctest --test-dir build -C Release --output-on-failure
