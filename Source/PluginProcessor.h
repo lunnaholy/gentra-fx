@@ -45,6 +45,10 @@ public:
 
     // Порядок всех машин в гараже (номера gentra::car). Рабочие эффекты звучат в этом порядке, остальные пропускаются.
     // Хранится в состоянии плагина (пресеты); звук переключается на новый порядок через короткий провал громкости.
+    // Пик на входе (после входного гейна) или выходе (после выходного) по каналу с прошлого вызова — для индикаторов.
+    enum Meter { input, output };
+    float takePeak (Meter m, int channel) noexcept { return peaks[static_cast<size_t> (m * 2 + channel)].exchange (0.0f); }
+
     // Насколько эффект машины давит громкость сейчас (0..1): сайдчейн — провал, гейт — закрытость. Для визуала.
     float effectLevel (int car) const noexcept;
 
@@ -147,6 +151,15 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> driveEngaged;
 
     std::atomic<float> bassLevel { 0.0f };
+
+    // Гейн на входе и выходе всей цепочки: 0 дБ — буфер не трогается.
+    std::atomic<float>* inputGainDb;
+    std::atomic<float>* outputGainDb;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> inputGain, outputGain;
+    static void applyGain (juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative>&, float targetDb,
+                           juce::AudioBuffer<float>&, int numChannels) noexcept;
+    std::array<std::atomic<float>, 4> peaks {}; // вход L, R, выход L, R
+    void measure (Meter, const juce::AudioBuffer<float>&, int numChannels) noexcept;
 
     // Снимок транспорта на начало последнего блока (пишет аудиопоток, читает интерфейс).
     std::atomic<bool> clockPlaying { false };

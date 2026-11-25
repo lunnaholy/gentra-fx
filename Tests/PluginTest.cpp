@@ -1042,6 +1042,38 @@ void eqGraph()
     CHECK (std::abs (value ("eqMid")) < 0.01f);
 }
 
+// Вход и выход: гейн в дБ на всей цепочке, пики для индикаторов (вход — после входного гейна, выход — после выходного).
+void ioGain()
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (48000.0, 512);
+    p.prepareToPlay (48000.0, 512);
+    juce::MidiBuffer midi;
+    juce::Random rng (4);
+    const auto peakAfter = [&] (float inDb, float outDb)
+    {
+        setParam (p, "inputGain", inDb);
+        setParam (p, "outputGain", outDb);
+        p.reset();
+        juce::AudioBuffer<float> buf (2, 512);
+        juce::FloatVectorOperations::fill (buf.getWritePointer (0), 0.25f, 512);
+        juce::FloatVectorOperations::fill (buf.getWritePointer (1), -0.125f, 512);
+        for (int m = 0; m < 2; ++m)
+            for (int ch = 0; ch < 2; ++ch)
+                p.takePeak (static_cast<GentraAudioProcessor::Meter> (m), ch);
+        p.processBlock (buf, midi);
+        return buf.getSample (0, 100);
+    };
+    CHECK (std::abs (peakAfter (6.0f, 0.0f) - 0.25f * juce::Decibels::decibelsToGain (6.0f)) < 1.0e-5f);
+    CHECK (std::abs (p.takePeak (GentraAudioProcessor::input, 0) - 0.25f * juce::Decibels::decibelsToGain (6.0f)) < 1.0e-5f);
+    CHECK (std::abs (p.takePeak (GentraAudioProcessor::input, 1) - 0.125f * juce::Decibels::decibelsToGain (6.0f)) < 1.0e-5f);
+    CHECK (std::abs (peakAfter (6.0f, -6.0f) - 0.25f) < 1.0e-5f);
+    CHECK (std::abs (p.takePeak (GentraAudioProcessor::output, 0) - 0.25f) < 1.0e-5f);
+    CHECK (p.takePeak (GentraAudioProcessor::output, 0) <= 0.0f); // забрали — обнулился
+    peakAfter (0.0f, 0.0f);
+    CHECK (transparent (p, rng)); // в нуле — побитово
+}
+
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
 
 void beatSync()
@@ -1201,6 +1233,7 @@ int main (int argc, char** argv)
     garage();
     garagePanel();
     eqGraph();
+    ioGain();
     beatSync();
 
     std::printf ("OK\n");

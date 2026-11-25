@@ -126,6 +126,118 @@ void Box::paint (juce::Graphics& g)
     drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
 }
 
+// ---------------- вход и выход ----------------
+
+IoPanel::IoPanel (GentraAudioProcessor& p) : processor (p)
+{
+    const char* ids[] { "inputGain", "outputGain" };
+    const char* names[] { "Вход", "Выход" };
+    for (size_t i = 0; i < sides.size(); ++i)
+    {
+        auto& s = sides[i];
+        s.label.setText (ru (names[i]), juce::dontSendNotification);
+        s.label.setJustificationType (juce::Justification::centredLeft);
+        s.slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        s.slider.setTextBoxStyle (juce::Slider::TextBoxRight, true, 50, 20);
+        s.slider.setColour (juce::Slider::textBoxTextColourId, juce::Colours::black);
+        s.slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        s.slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        s.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (p.apvts, ids[i], s.slider);
+        s.slider.textFromValueFunction = [] (double v)
+        {
+            if (std::abs (v) < 0.05)
+                v = 0.0;
+            return (v > 0.0 ? "+" : "") + juce::String (v, 1) + " " + ru ("дБ");
+        };
+        s.slider.updateText();
+        s.slider.setDoubleClickReturnValue (true, 0.0);
+        s.slider.setTitle (ru (i == 0 ? "Входной гейн" : "Выходной гейн"));
+        addAndMakeVisible (s.label);
+        addAndMakeVisible (s.slider);
+    }
+    lastTick = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz (30);
+}
+
+void IoPanel::resized()
+{
+    const int half = getWidth() / 2;
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& s = sides[static_cast<size_t> (i)];
+        const int x = i * half;
+        s.label.setBounds (x + 14, 4, 46, 22);
+        s.slider.setBounds (x + 58, 4, half - 64, 22);
+        s.meter = { static_cast<float> (x + 22), 30.0f, static_cast<float> (half - 40), 10.0f };
+    }
+}
+
+void IoPanel::timerCallback()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const auto dt = static_cast<float> ((now - lastTick) * 0.001);
+    lastTick = now;
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& s = sides[static_cast<size_t> (i)];
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const float peak = processor.takePeak (i == 0 ? GentraAudioProcessor::input : GentraAudioProcessor::output, ch);
+            const float db = juce::Decibels::gainToDecibels (peak, floorDb);
+            auto& shown = s.shownDb[static_cast<size_t> (ch)];
+            shown = juce::jmax (db, shown - 24.0f * dt); // спад 24 дБ/с
+            if (db >= s.holdDb[static_cast<size_t> (ch)] || now > s.holdUntil[static_cast<size_t> (ch)])
+            {
+                s.holdDb[static_cast<size_t> (ch)] = db;
+                s.holdUntil[static_cast<size_t> (ch)] = now + 1000.0;
+            }
+            if (peak > 1.0f)
+                s.clipUntil = now + 1500.0;
+        }
+    }
+    repaint();
+}
+
+void IoPanel::paint (juce::Graphics& g)
+{
+    g.setOpacity (1.0f);
+    drawNine (g, image, getLocalBounds().toFloat(), 70, 14.0f);
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const auto xOf = [] (juce::Rectangle<float> r, float db)
+    { return r.getX() + r.getWidth() * juce::jlimit (0.0f, 1.0f, (db - floorDb) / (ceilingDb - floorDb)); };
+
+    for (auto& s : sides)
+    {
+        // Паз индикатора и лампа перегруза справа.
+        const auto slot = s.meter.withTrimmedRight (12.0f);
+        g.setColour (juce::Colour (0xff0d1013));
+        g.fillRoundedRectangle (s.meter.expanded (1.5f), 2.5f);
+        const auto clip = s.meter.withLeft (s.meter.getRight() - 9.0f);
+        g.setColour (now < s.clipUntil ? juce::Colour (0xffff3b30) : juce::Colour (0xff3a1513));
+        g.fillRoundedRectangle (clip, 2.0f);
+
+        const juce::ColourGradient grad (juce::Colour (0xff57c22e), xOf (slot, -18.0f), 0.0f, juce::Colour (0xffff3b30), xOf (slot, 0.0f), 0.0f, false);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const auto bar = slot.withHeight (4.0f).withY (slot.getY() + 6.0f * static_cast<float> (ch));
+            g.setColour (juce::Colours::white.withAlpha (0.06f));
+            g.fillRect (bar);
+            auto gradient = grad;
+            gradient.addColour (0.5, juce::Colour (0xffe8a23a));
+            g.setGradientFill (gradient);
+            g.fillRect (bar.withRight (xOf (slot, s.shownDb[static_cast<size_t> (ch)])));
+            if (s.holdDb[static_cast<size_t> (ch)] > floorDb)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.85f));
+                g.fillRect (juce::Rectangle<float> (xOf (slot, s.holdDb[static_cast<size_t> (ch)]) - 1.0f, bar.getY(), 1.5f, bar.getHeight()));
+            }
+        }
+        // Метка 0 дБ.
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.fillRect (juce::Rectangle<float> (xOf (slot, 0.0f), slot.getY() - 1.0f, 1.0f, slot.getHeight() + 2.0f));
+    }
+}
+
 // ---------------- график эквалайзера ----------------
 
 namespace
@@ -536,7 +648,7 @@ void GaragePanel::mouseUp (const juce::MouseEvent&)
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); },
                                                            [&p] (int car) { return p.effectLevel (car); }),
-      eqGraph (p.apvts), garage (p, road)
+      eqGraph (p.apvts), io (p), garage (p, road)
 {
     setLookAndFeel (&look);
     addAndMakeVisible (content);
@@ -577,6 +689,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     }
     popup.addChildComponent (eqGraph);
     content.addChildComponent (popup);
+    content.addAndMakeVisible (io);
 
     // Гараж: кнопка в углу выдвигает панель справа; закрытая панель ждёт за правым краем.
     garageButton.setButtonText (ru ("Гараж"));
@@ -635,6 +748,9 @@ void GentraAudioProcessorEditor::layoutContent()
     road.setBounds (content.getLocalBounds());
 
     placePopup (static_cast<int> (rows.size()));
+
+    // Вход и выход — сверху между номером и кнопкой гаража; открытый гараж их не закрывает.
+    io.setBounds (214, 6, 360, 46);
 
     garageButton.setTransform ({});
     garageButton.setBounds (RoadView::width - 8 - 96, 8, 96, 34);

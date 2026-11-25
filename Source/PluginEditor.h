@@ -28,6 +28,36 @@ struct Box final : juce::Component
     juce::Image image = RoadView::image ("panel_png");
 };
 
+// Вход и выход всей цепочки: гейн в дБ (двойной клик — 0) и индикаторы пика L/R со спадом, удержанием пика
+// и лампой перегруза. Металлическая табличка сверху посередине.
+class IoPanel final : public juce::Component, private juce::Timer
+{
+public:
+    explicit IoPanel (GentraAudioProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    static constexpr float floorDb = -48.0f, ceilingDb = 6.0f; // шкала индикатора
+
+private:
+    void timerCallback() override;
+
+    struct Side
+    {
+        juce::Label label;
+        juce::Slider slider;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+        juce::Rectangle<float> meter;
+        std::array<float, 2> shownDb { floorDb, floorDb }, holdDb { floorDb, floorDb };
+        std::array<double, 2> holdUntil {};
+        double clipUntil = 0.0;
+    };
+    GentraAudioProcessor& processor;
+    std::array<Side, 2> sides; // 0 — вход, 1 — выход
+    double lastTick = 0.0;
+    juce::Image image = RoadView::image ("panel_png");
+};
+
 // График белой машины: примерная АЧХ полос и громкости. Точки полос тянутся мышью, как в эквалайзере микшера FL:
 // по горизонтали частота, по вертикали усиление; колесо над «Серединой» — ширина (Q), двойной клик — усиление в ноль.
 class EqGraph final : public juce::Component, private juce::Timer
@@ -150,6 +180,8 @@ private:
     std::array<Row, 3> rows; // до трёх доп. параметров; табличка — под их число
     EqGraph eqGraph;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
+
+    IoPanel io;
 
     // Гараж: какие машины на дороге.
     juce::TextButton garageButton;

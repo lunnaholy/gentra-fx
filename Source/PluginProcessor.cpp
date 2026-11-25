@@ -84,7 +84,9 @@ GentraAudioProcessor::GentraAudioProcessor()
       panNote (apvts.getRawParameterValue ("panNote")),
       panShape (apvts.getRawParameterValue ("panShape")),
       delaySync (apvts.getRawParameterValue ("delaySync")),
-      delayNote (apvts.getRawParameterValue ("delayNote"))
+      delayNote (apvts.getRawParameterValue ("delayNote")),
+      inputGainDb (apvts.getRawParameterValue ("inputGain")),
+      outputGainDb (apvts.getRawParameterValue ("outputGain"))
 {
     for (size_t i = 0; i < eqShapeIds.size(); ++i)
         eqShapeRaw[i] = apvts.getRawParameterValue (eqShapeIds[i]);
@@ -119,11 +121,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     rate.setSkewForCentre (3.0f);
 
     // Шаг 0.1 дБ, но округление своё: штатное (−12 + 120·0.1) даёт вместо нуля 1.8e-7, и эквалайзер не простаивал бы.
-    juce::NormalisableRange<float> decibels (-12.0f, 12.0f,
-                                             [] (float start, float end, float t) { return start + (end - start) * t; },
-                                             [] (float start, float end, float v) { return (v - start) / (end - start); },
-                                             [] (float, float, float v) { return std::round (v * 10.0f) / 10.0f; });
-    decibels.interval = 0.1f;
+    const auto decibelRange = [] (float limit)
+    {
+        juce::NormalisableRange<float> r (-limit, limit,
+                                          [] (float start, float end, float t) { return start + (end - start) * t; },
+                                          [] (float start, float end, float v) { return (v - start) / (end - start); },
+                                          [] (float, float, float v) { return std::round (v * 10.0f) / 10.0f; });
+        r.interval = 0.1f;
+        return r;
+    };
+    const auto decibels = decibelRange (12.0f), gainDb = decibelRange (24.0f);
     const auto dB = Attributes().withLabel ("dB");
 
     juce::NormalisableRange<float> delayMs (60.0f, 600.0f, 1.0f);
@@ -237,7 +244,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         // Ширина: −100% — моно, 0 — как есть, +100% — боковой сигнал вдвое громче.
         std::make_unique<Float> (juce::ParameterID { "panWidth", 5 }, "Pan Width", juce::NormalisableRange<float> (-100.0f, 100.0f, 1.0f), 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "panMix", 5 }, "Pan Mix", percent, 100.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "panOn", 5 }, "Pan On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "panOn", 5 }, "Pan On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "inputGain", 6 }, "Input Gain", gainDb, 0.0f, dB),
+        std::make_unique<Float> (juce::ParameterID { "outputGain", 6 }, "Output Gain", gainDb, 0.0f, dB)
     };
     return layout;
 }
@@ -284,6 +294,10 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     chainGain.reset (sampleRate, 0.01);
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
+    inputGain.reset (sampleRate, smoothingSeconds);
+    outputGain.reset (sampleRate, smoothingSeconds);
+    inputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (inputGainDb->load(), -1000.0f));
+    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputGainDb->load(), -1000.0f));
 }
 
 void GentraAudioProcessor::reset()
@@ -318,6 +332,40 @@ void GentraAudioProcessor::reset()
     panNow = 0.0;
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
+    inputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (inputGainDb->load(), -1000.0f));
+    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputGainDb->load(), -1000.0f));
+}
+
+// 0 дБ и ничего не едет — буфер не трогаем (bit-perfect).
+void GentraAudioProcessor::applyGain (juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative>& gain, float targetDb,
+                                      juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    gain.setTargetValue (juce::Decibels::decibelsToGain (targetDb, -1000.0f));
+    if (! gain.isSmoothing())
+    {
+        if (gain.getCurrentValue() != 1.0f)
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.applyGain (ch, 0, buffer.getNumSamples(), gain.getCurrentValue());
+        return;
+    }
+    auto* const* data = buffer.getArrayOfWritePointers();
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const float g = gain.getNextValue();
+        for (int ch = 0; ch < numChannels; ++ch)
+            data[ch][n] *= g;
+    }
+}
+
+void GentraAudioProcessor::measure (Meter m, const juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    for (int ch = 0; ch < gentra::maxChannels && numChannels > 0; ++ch)
+    {
+        const float peak = buffer.getMagnitude (juce::jmin (ch, numChannels - 1), 0, buffer.getNumSamples()); // моно — в оба
+        auto& slot = peaks[static_cast<size_t> (m * 2 + ch)];
+        if (peak > slot.load (std::memory_order_relaxed))
+            slot.store (peak, std::memory_order_relaxed);
+    }
 }
 
 bool GentraAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -338,6 +386,8 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     readTransport();
     const int numChannels = juce::jmin (buffer.getNumChannels(), gentra::maxChannels);
     auto* const* data = buffer.getArrayOfWritePointers();
+    applyGain (inputGain, inputGainDb->load(), buffer, numChannels);
+    measure (input, buffer, numChannels);
 
     // Новый порядок — только когда громкость уже ушла в ноль.
     const auto wanted = chain.load (std::memory_order_relaxed);
@@ -355,6 +405,9 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             for (int ch = 0; ch < numChannels; ++ch)
                 data[ch][n] *= gain;
         }
+
+    applyGain (outputGain, outputGainDb->load(), buffer, numChannels);
+    measure (output, buffer, numChannels);
 
     // Метр низа: один полюс ~150 Гц по моно-сумме, пик держится, пока интерфейс его не заберёт.
     if (numChannels > 0)
