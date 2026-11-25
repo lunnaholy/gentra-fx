@@ -38,8 +38,10 @@ public:
 
     // bassLevel — откуда брать уровень низа для тряски; beatClock — где сейчас транспорт DAW
     // (доля в такте и темп в долях в минуту, false — стоит). Оба зовутся раз в кадр на message thread.
+    // carLevel — насколько эффект машины сейчас давит громкость (сайдчейн, гейт), 0..1.
     using BeatClock = std::function<bool (double& beatInBar, double& bpm)>;
-    RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel, BeatClock beatClock = {});
+    using CarLevel = std::function<float (int car)>;
+    RoadView (juce::AudioProcessorValueTreeState&, std::function<float()> bassLevel, BeatClock beatClock = {}, CarLevel carLevel = {});
 
     // Скрытые машины не рисуются и не мешают потоку; скрытый рабочий эффект выключается.
     // Маска хранится в состоянии плагина (пресеты).
@@ -108,6 +110,8 @@ private:
     juce::AudioProcessorValueTreeState& apvts;
     std::function<float()> bassLevel;
     BeatClock beatClock;
+    CarLevel carLevel;
+    float level (int car) const { return carLevel ? carLevel (car) : 0.0f; }
 
     float bodyHeight (int car) const; // высота картинки кузова в длинах машины
     std::array<juce::Image, numCars> bodies;

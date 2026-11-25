@@ -195,6 +195,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
     w[pink] = { "phaserDepth", "ГЛУБИНА", "%", 0, false, "phaserMix", "phaserOn" };
     w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
+    w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
     return w;
 }();
 
@@ -218,8 +219,8 @@ juce::String RoadView::effectName (int car) { return ru (carInfo[static_cast<siz
 juce::String RoadView::carModel (int car) { return ru (carInfo[static_cast<size_t> (car)].model); }
 juce::Colour RoadView::bodyColour (int car) { return juce::Colour (carInfo[static_cast<size_t> (car)].colour); }
 
-RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level, BeatClock clock)
-    : apvts (state), bassLevel (std::move (level)), beatClock (std::move (clock)),
+RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<float()> level, BeatClock clock, CarLevel effect)
+    : apvts (state), bassLevel (std::move (level)), beatClock (std::move (clock)), carLevel (std::move (effect)),
       sky (asset ("sky_jpg")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
       road (asset ("road_jpg")), lamp (asset ("lamp_png")), props (asset ("props_png")),
       wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
@@ -279,6 +280,8 @@ float RoadView::strength (int car) const
         return param ("phaserDepth") * 0.01f * param ("phaserMix") * 0.01f;
     if (car == grey)
         return param ("reverbSize") * 0.01f * param ("reverbMix") * 0.01f;
+    if (car == purple)
+        return param ("sidechainDepth") * 0.01f * param ("sidechainMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -907,15 +910,6 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
             drawInCarUnits (g, body, 0.55f * mix * std::pow (juce::jmax (feedback, 0.3f), static_cast<float> (n - 1)),
                             juce::AffineTransform::translation (-static_cast<float> (n) * spacing, 0.0f));
     }
-    else if (i == purple)
-    {
-        for (int n = 2; n >= 1; --n)
-        {
-            const float fn = static_cast<float> (n);
-            drawInCarUnits (g, body, 0.4f * 0.35f + 0.08f,
-                            juce::AffineTransform::translation (-0.5f - fn * 0.07f, 0.2f * fn).scaled (1.0f - fn * 0.12f).translated (0.5f, 0.0f));
-        }
-    }
     else if (i == grey && strength (grey) > 0.0f)
     {
         // Отражение на мокром асфальте: длиннее с размером, заметнее с размером и Mix.
@@ -953,7 +947,8 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         if (i == black && blackMix > 0.0f)
             g.addTransform (juce::AffineTransform::translation (0.0f, 0.009f * sub * blackMix * juce::jmax (0.0f, 1.0f - phase * 3.0f)));
 
-        drawInCarUnits (g, body, alpha);
+        // Сайдчейн: кузов приседает на колёсах вместе с провалом громкости.
+        drawInCarUnits (g, body, alpha, juce::AffineTransform::translation (0.0f, i == purple ? -0.03f * level (purple) : 0.0f));
         if (i == black)
             drawInCarUnits (g, tint, alpha * param ("tint") * 0.01f);
         if (i == rustCar)

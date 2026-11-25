@@ -18,13 +18,14 @@ struct Extra
     int decimals = 0;
     bool sign = false; // «+» у положительных (параметр от минуса до плюса)
 };
-// Номера машин — gentra::car: 0 чёрная, 1 ржавая, 2 красная, 6 синяя, 7 розовая, 8 серебряная, 9 серая, 11 белая.
+// Номера машин — gentra::car: 0 чёрная, 1 ржавая, 2 красная, 5 фиолетовая, 6 синяя, 7 розовая, 8 серебряная, 9 серая, 11 белая.
 const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
 {
     std::array<std::array<Extra, 3>, RoadView::numCars> e {};
     e[0] = { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 }, {} } };
     e[1] = { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 }, {} } };
     e[2] = { { { "distTone", "Тон", "%", 0 }, {}, {} } };
+    e[5] = { { { "sidechainNote", "Шаг", "", 0 }, { "sidechainShape", "Форма", "%", 0 }, {} } };
     e[6] = { { { "chorusRate", "Скорость", "Гц", 2 }, { "chorusFeedback", "Возврат", "%", 0 }, {} } };
     e[7] = { { { "phaserRate", "Скорость", "Гц", 2 }, { "phaserFeedback", "Возврат", "%", 0 }, {} } };
     e[8] = { { { "delayFeedback", "Повторы", "%", 0 }, { "delayTone", "Тон", "%", 0 }, {} } };
@@ -311,7 +312,8 @@ void GaragePanel::mouseUp (const juce::MouseEvent&)
 // ---------------- редактор ----------------
 
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
-    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); }),
+    : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); },
+                                                           [&p] (int car) { return p.effectLevel (car); }),
       garage (p, road)
 {
     setLookAndFeel (&look);
@@ -489,8 +491,11 @@ void GentraAudioProcessorEditor::showPopup (int car)
         row.label.setText (ru (extra.label), juce::dontSendNotification);
         row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, extra.id, row.slider);
         // Attachment ставит свой форматтер — подменяем на русские единицы.
-        row.slider.textFromValueFunction = [extra] (double v)
+        const auto* choice = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter (extra.id));
+        row.slider.textFromValueFunction = [extra, choice] (double v)
         {
+            if (choice != nullptr) // длительность ноты: «1/4», «1/16T»
+                return choice->choices[juce::jlimit (0, choice->choices.size() - 1, juce::roundToInt (v))];
             if (std::abs (v) < 0.05)
                 v = 0.0; // без «-0.0»
             return (extra.sign && v > 0.0 ? "+" : "") + juce::String (v, extra.decimals) + " " + ru (extra.unit);

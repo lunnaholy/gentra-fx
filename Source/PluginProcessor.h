@@ -45,6 +45,9 @@ public:
 
     // Порядок всех машин в гараже (номера gentra::car). Рабочие эффекты звучат в этом порядке, остальные пропускаются.
     // Хранится в состоянии плагина (пресеты); звук переключается на новый порядок через короткий провал громкости.
+    // Насколько эффект машины давит громкость сейчас (0..1): сайдчейн — провал, гейт — закрытость. Для визуала.
+    float effectLevel (int car) const noexcept;
+
     using CarOrder = std::array<int, gentra::car::count>;
     static constexpr CarOrder defaultOrder { gentra::car::black, gentra::car::rustCar, gentra::car::red, gentra::car::white,
                                              gentra::car::silver, gentra::car::green, gentra::car::orange, gentra::car::purple,
@@ -85,6 +88,9 @@ private:
     void processDrive (juce::AudioBuffer<float>&, int numChannels) noexcept;
     void processEq (juce::AudioBuffer<float>&, int numChannels) noexcept;
     void processDelay (juce::AudioBuffer<float>&, int numChannels) noexcept;
+    // Громкость по фазе шага: shape (phase, stepSeconds, extraA) → сколько убрать 0..1; level — куда опубликовать.
+    template <typename Shape>
+    void processStepGain (Stage&, std::atomic<float>* note, std::atomic<float>& level, juce::AudioBuffer<float>&, int numChannels, Shape&& shape) noexcept;
     // Стадия на готовом блоке JUCE: параметры — раз в кусок fxChunk, Mix — посэмплово.
     // apply (стерео-блок, main, extraA, extraB) обрабатывает копию входа на 100% wet; reset — когда стадия простаивает.
     template <typename Apply, typename Reset>
@@ -98,7 +104,11 @@ private:
     // ponytail: провал ~20 мс вместо настоящего кроссфейда (тот требует второй копии всех стадий).
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> chainGain;
 
-    Stage black, rust, red, white, silver, blue, pink, grey;
+    Stage black, rust, red, white, silver, blue, pink, grey, purple;
+    std::atomic<float>* sidechainNote; // индекс в gentra::delayDivisionNames
+    std::atomic<float> duckLevel { 0.0f };
+    // Позиция в четвертях: с хоста, пока он играет, иначе бежит сама по последнему темпу.
+    double ppqNow = 0.0;
     // Блоки JUCE готовятся на 2 канала и всегда получают стерео-копию (моно — дублируется): их ассерты требуют
     // ровно столько каналов, сколько при prepare.
     static constexpr int fxChunk = 32;

@@ -53,6 +53,17 @@ inline double delayDivisionSeconds (float index, double bpm) noexcept
 
 constexpr double pi = 3.14159265358979323846;
 
+constexpr double sidechainAttackSeconds = 0.003; // провал сайдчейна в начале шага — не мгновенный, без щелчка
+constexpr int defaultSidechainDivision = 15;    // 1/4
+
+// Сайдчейн: сколько громкости убрать (0..1) на фазе шага 0..1. Возврат (1 − phase)^k: k от 0.25 (Форма 0 — провал
+// держится почти весь шаг) до 4 (Форма 1 — резкий возврат); на стыке шагов короткая атака, громкость непрерывна.
+inline double sidechainDuck (double phase, double stepSeconds, double shape) noexcept
+{
+    const double k = std::pow (2.0, 4.0 * shape - 2.0);
+    return std::min (1.0, phase * stepSeconds / sidechainAttackSeconds) * std::pow (1.0 - phase, k);
+}
+
 // Номера машин: на дороге, в маске гаража и в порядке цепочки.
 namespace car
 {

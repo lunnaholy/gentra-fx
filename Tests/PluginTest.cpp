@@ -446,9 +446,9 @@ void delayCar (double sampleRate)
     CHECK (p.getTailLengthSeconds() <= 0.0);
 }
 
-// Машина на блоке JUCE (хорус, фэйзер, реверб): по умолчанию, в нуле, при Mix 0 и выключенная — побитово прозрачна;
+// Машина-эффект (хорус, фэйзер, реверб, сайдчейн, гейт): по умолчанию, в нуле, при Mix 0 и выключенная — побитово прозрачна;
 // выкрученная — меняет звук без NaN и разноса, в том числе в моно.
-void jucePedal (double sampleRate, const char* main, const char* mix, const char* on)
+void effectCar (double sampleRate, const char* main, const char* mix, const char* on)
 {
     GentraAudioProcessor p;
     p.setRateAndBufferSizeDetails (sampleRate, 512);
@@ -520,6 +520,65 @@ void reverbCar (double sampleRate)
     CHECK (p.getTailLengthSeconds() <= 0.0);
 }
 
+// Постоянные 0.5 в течение seconds блоками по 512; если хост играет, его ppq идёт вместе с блоками. Выход канала 0.
+std::vector<float> stepRun (GentraAudioProcessor& p, FakeHead& head, double sampleRate, double seconds)
+{
+    juce::MidiBuffer midi;
+    std::vector<float> out;
+    juce::AudioBuffer<float> buf (2, 512);
+    while (static_cast<double> (out.size()) < seconds * sampleRate)
+    {
+        if (head.info.getIsPlaying())
+            head.info.setPpqPosition (static_cast<double> (out.size()) / sampleRate * 2.0); // 120 BPM — 2 четверти в секунду
+        for (int ch = 0; ch < 2; ++ch)
+            juce::FloatVectorOperations::fill (buf.getWritePointer (ch), 0.5f, 512);
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        out.insert (out.end(), buf.getReadPointer (0), buf.getReadPointer (0) + 512);
+    }
+    return out;
+}
+
+float biggestStep (const std::vector<float>& y)
+{
+    float worst = 0.0f;
+    for (size_t n = 1; n < y.size(); ++n)
+        worst = juce::jmax (worst, std::abs (y[n] - y[n - 1]));
+    return worst;
+}
+
+// Фиолетовая: на каждую четверть громкость проседает и возвращается, провал — с короткой атакой, без щелчков;
+// без транспорта — по последнему темпу.
+void sidechainCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    FakeHead head;
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    p.setPlayHead (&head);
+    CHECK (p.apvts.getParameter ("sidechainNote")->getCurrentValueAsText() == "1/4");
+    setParam (p, "sidechainDepth", 100.0f);
+    p.reset(); // параметры сразу на месте
+
+    const auto y = stepRun (p, head, sampleRate, 1.0);
+    const auto at = [&] (double seconds) { return y[static_cast<size_t> (juce::roundToInt (seconds * sampleRate))]; };
+    std::printf ("sidechain %.0f Hz: 6 ms into step %.3f, 95%% of step %.3f, biggest step %.4f\n", sampleRate, at (0.506), at (0.475), biggestStep (y));
+    CHECK (at (0.506) < 0.1f);
+    CHECK (at (0.475) > 0.45f);
+    CHECK (biggestStep (y) < 0.01f);
+    CHECK (p.effectLevel (gentra::car::purple) > 0.0f);
+
+    head.info.setIsPlaying (false); // стоит, темп помнит — качает дальше: за 0.9 с два провала
+    const auto free = stepRun (p, head, sampleRate, 0.9);
+    int dips = free[0] < 0.1f ? 1 : 0;
+    for (size_t n = 1; n < free.size(); ++n)
+        dips += free[n] < 0.1f && free[n - 1] >= 0.1f;
+    CHECK (dips == 2);
+    p.setPlayHead (nullptr);
+}
+
 // Случайная автоматизация белой и серебряной (вместе с остальными) и размеры блока: без NaN/Inf и разноса.
 void automation (double sampleRate)
 {
@@ -533,9 +592,10 @@ void automation (double sampleRate)
     {
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
-                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix" })
+                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix",
+                         "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -890,6 +950,16 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "chorusDepth", percent);
     setParam (p, "phaserDepth", percent);
     setParam (p, "reverbSize", percent);
+    setParam (p, "sidechainDepth", percent);
+    {
+        // Немного звука, чтобы сайдчейн и гейт были посреди шага (провал виден на машине).
+        p.setRateAndBufferSizeDetails (48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+        juce::AudioBuffer<float> buf (2, 2880); // 60 мс
+        buf.clear();
+        juce::MidiBuffer midi;
+        p.processBlock (buf, midi);
+    }
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
@@ -929,10 +999,12 @@ int main (int argc, char** argv)
         run (sampleRate);
         equalizer (sampleRate);
         delayCar (sampleRate);
-        jucePedal (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
-        jucePedal (sampleRate, "phaserDepth", "phaserMix", "phaserOn");
-        jucePedal (sampleRate, "reverbSize", "reverbMix", "reverbOn");
+        effectCar (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
+        effectCar (sampleRate, "phaserDepth", "phaserMix", "phaserOn");
+        effectCar (sampleRate, "reverbSize", "reverbMix", "reverbOn");
         reverbCar (sampleRate);
+        effectCar (sampleRate, "sidechainDepth", "sidechainMix", "sidechainOn");
+        sidechainCar (sampleRate);
         automation (sampleRate);
         chainOrder (sampleRate);
     }
