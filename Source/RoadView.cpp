@@ -196,6 +196,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[pink] = { "phaserDepth", "ГЛУБИНА", "%", 0, false, "phaserMix", "phaserOn" };
     w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
     w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
+    w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
     return w;
 }();
 
@@ -282,6 +283,8 @@ float RoadView::strength (int car) const
         return param ("reverbSize") * 0.01f * param ("reverbMix") * 0.01f;
     if (car == purple)
         return param ("sidechainDepth") * 0.01f * param ("sidechainMix") * 0.01f;
+    if (car == yellow)
+        return param ("gateDepth") * 0.01f * param ("gateMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -949,6 +952,20 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
 
         // Сайдчейн: кузов приседает на колёсах вместе с провалом громкости.
         drawInCarUnits (g, body, alpha, juce::AffineTransform::translation (0.0f, i == purple ? -0.03f * level (purple) : 0.0f));
+        if (i == yellow && strength (yellow) > 0.0f)
+        {
+            // Шашечки такси на крыше: горят, пока гейт открыт, гаснут, когда закрыт.
+            const float lit = 1.0f - level (yellow), top = bodyHeight (yellow) - 0.026f, x0 = 0.43f, cell = 0.018f;
+            g.setColour (rgba (255, 220, 80, 0.5f * lit));
+            g.fillRoundedRectangle (x0 - 0.02f, top - 0.012f, 6.0f * cell + 0.04f, 2.0f * cell + 0.03f, 0.02f);
+            for (int row = 0; row < 2; ++row)
+                for (int col = 0; col < 6; ++col)
+                {
+                    const bool dark = (row + col) % 2 == 0;
+                    g.setColour (dark ? rgba (20, 20, 20, alpha) : rgba (255, 214, 40, alpha).interpolatedWith (juce::Colours::white, 0.6f * lit));
+                    g.fillRect (x0 + cell * static_cast<float> (col), top + cell * static_cast<float> (row), cell, cell);
+                }
+        }
         if (i == black)
             drawInCarUnits (g, tint, alpha * param ("tint") * 0.01f);
         if (i == rustCar)

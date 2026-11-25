@@ -18,7 +18,7 @@ struct Extra
     int decimals = 0;
     bool sign = false; // «+» у положительных (параметр от минуса до плюса)
 };
-// Номера машин — gentra::car: 0 чёрная, 1 ржавая, 2 красная, 5 фиолетовая, 6 синяя, 7 розовая, 8 серебряная, 9 серая, 11 белая.
+// Номера машин — gentra::car: 0 чёрная, 1 ржавая, 2 красная, 5 фиолетовая, 6 синяя, 7 розовая, 8 серебряная, 9 серая, 10 жёлтая, 11 белая.
 const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
 {
     std::array<std::array<Extra, 3>, RoadView::numCars> e {};
@@ -30,7 +30,8 @@ const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
     e[7] = { { { "phaserRate", "Скорость", "Гц", 2 }, { "phaserFeedback", "Возврат", "%", 0 }, {} } };
     e[8] = { { { "delayFeedback", "Повторы", "%", 0 }, { "delayTone", "Тон", "%", 0 }, {} } };
     e[9] = { { { "reverbDamping", "Глушение", "%", 0 }, {}, {} } };
-    e[11] ={ { { "eqLow", "Низ", "дБ", 1, true }, { "eqMid", "Середина", "дБ", 1, true }, { "eqHigh", "Верх", "дБ", 1, true } } };
+    e[10] = { { { "gateNote", "Шаг", "", 0 }, { "gateSmooth", "Плавность", "%", 0 }, {} } };
+    e[11] = { { { "eqLow", "Низ", "дБ", 1, true }, { "eqMid", "Середина", "дБ", 1, true }, { "eqHigh", "Верх", "дБ", 1, true } } };
     return e;
 }();
 

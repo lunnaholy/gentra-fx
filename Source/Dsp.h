@@ -64,6 +64,19 @@ inline double sidechainDuck (double phase, double stepSeconds, double shape) noe
     return std::min (1.0, phase * stepSeconds / sidechainAttackSeconds) * std::pow (1.0 - phase, k);
 }
 
+constexpr double gateMinRampSeconds = 0.001; // фронт гейта при Плавности 0 — без щелчка
+constexpr int defaultGateDivision = 9;       // 1/16
+
+// Гейт: насколько открыт (0..1) на фазе шага 0..1. Открыт первую половину шага; фронты — рампы шириной
+// от 1 мс (Плавность 0) до четверти шага (Плавность 1, почти треугольник).
+inline double gateOpen (double phase, double stepSeconds, double smooth) noexcept
+{
+    const double ramp = std::min (0.25, std::max (gateMinRampSeconds / stepSeconds, 0.25 * smooth));
+    if (phase < 0.5)
+        return std::min (1.0, phase / ramp);
+    return std::max (0.0, 1.0 - (phase - 0.5) / ramp);
+}
+
 // Номера машин: на дороге, в маске гаража и в порядке цепочки.
 namespace car
 {

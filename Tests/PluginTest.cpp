@@ -579,6 +579,31 @@ void sidechainCar (double sampleRate)
     p.setPlayHead (nullptr);
 }
 
+// Жёлтая: на 1/16 открыт первую половину шага, закрыт вторую, фронты без щелчков.
+void gateCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    FakeHead head;
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    p.setPlayHead (&head);
+    CHECK (p.apvts.getParameter ("gateNote")->getCurrentValueAsText() == "1/16");
+    setParam (p, "gateDepth", 100.0f);
+    setParam (p, "gateSmooth", 0.0f);
+    p.reset();
+
+    const auto y = stepRun (p, head, sampleRate, 0.5);
+    const auto at = [&] (double seconds) { return y[static_cast<size_t> (juce::roundToInt (seconds * sampleRate))]; };
+    // Шаг 1/16 при 120 BPM — 0.125 с: четвёртый шаг с 0.375 с.
+    std::printf ("gate %.0f Hz: open %.3f, closed %.3f, biggest step %.4f\n", sampleRate, at (0.375 + 0.03125), at (0.375 + 0.09375), biggestStep (y));
+    CHECK (std::abs (at (0.375 + 0.03125) - 0.5f) < 1.0e-4f);
+    CHECK (at (0.375 + 0.09375) < 1.0e-4f);
+    CHECK (biggestStep (y) < 0.02f);
+    p.setPlayHead (nullptr);
+}
+
 // Случайная автоматизация белой и серебряной (вместе с остальными) и размеры блока: без NaN/Inf и разноса.
 void automation (double sampleRate)
 {
@@ -593,9 +618,10 @@ void automation (double sampleRate)
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
                          "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix",
-                         "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix" })
+                         "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
+                         "gateDepth", "gateNote", "gateSmooth", "gateMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -673,7 +699,7 @@ void chainOrder (double sampleRate)
 
     // Декоративные местами — звук тот же, без провала: прозрачно сразу.
     auto decor = GentraAudioProcessor::defaultOrder;
-    std::swap (decor[6], decor[11]); // оранжевая и жёлтая
+    std::swap (decor[5], decor[6]); // зелёная и оранжевая
     p.setCarOrder (decor);
     CHECK (transparent (p, rng));
 
@@ -741,9 +767,11 @@ void driveClicks (double sampleRate)
 void traffic()
 {
     GentraAudioProcessor p;
-    // Скорость рабочей машины — от силы эффекта; синяя и серая едут, как раньше декоративными (0.128 и 0.165).
+    // Скорость рабочей машины — от силы эффекта; синяя и серая едут, как раньше декоративными (0.128 и 0.165),
+    // жёлтая выключена и ползёт, как раньше.
     setParam (p, "chorusDepth", 25.6f);
     setParam (p, "reverbSize", 55.0f);
+    setParam (p, "gateOn", 0.0f);
     for (int car : { -1, 0 })
     {
         RoadView road (p.apvts, nullptr);
@@ -951,6 +979,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "phaserDepth", percent);
     setParam (p, "reverbSize", percent);
     setParam (p, "sidechainDepth", percent);
+    setParam (p, "gateDepth", percent);
     {
         // Немного звука, чтобы сайдчейн и гейт были посреди шага (провал виден на машине).
         p.setRateAndBufferSizeDetails (48000.0, 512);
@@ -1005,6 +1034,8 @@ int main (int argc, char** argv)
         reverbCar (sampleRate);
         effectCar (sampleRate, "sidechainDepth", "sidechainMix", "sidechainOn");
         sidechainCar (sampleRate);
+        effectCar (sampleRate, "gateDepth", "gateMix", "gateOn");
+        gateCar (sampleRate);
         automation (sampleRate);
         chainOrder (sampleRate);
     }
