@@ -446,6 +446,49 @@ void delayCar (double sampleRate)
     CHECK (p.getTailLengthSeconds() <= 0.0);
 }
 
+// Машина на блоке JUCE (хорус, фэйзер, реверб): по умолчанию, в нуле, при Mix 0 и выключенная — побитово прозрачна;
+// выкрученная — меняет звук без NaN и разноса, в том числе в моно.
+void jucePedal (double sampleRate, const char* main, const char* mix, const char* on)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::Random rng (9);
+    juce::MidiBuffer midi;
+    CHECK (transparent (p, rng));
+
+    setParam (p, main, 100.0f);
+    setParam (p, mix, 100.0f);
+    settle (p, sampleRate, rng);
+    {
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate * 0.5)), ref;
+        fillNoise (buf, rng, 0.5f);
+        ref.makeCopyOf (buf);
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        CHECK (! bitExact (buf, ref));
+        std::printf ("%s %.0f Hz: noise rms %.3f -> %.3f, peak %.2f\n", main, sampleRate, rms (ref), rms (buf), buf.getMagnitude (0, buf.getNumSamples()));
+        CHECK (buf.getMagnitude (0, buf.getNumSamples()) < 4.0f);
+
+        juce::AudioBuffer<float> mono (1, 777);
+        fillNoise (mono, rng, 0.5f);
+        p.processBlock (mono, midi);
+        CHECK (allFinite (mono));
+    }
+
+    setParam (p, mix, 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, mix, 100.0f);
+    setParam (p, on, 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, on, 1.0f);
+    setParam (p, main, 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+}
+
 // Случайная автоматизация белой и серебряной (вместе с остальными) и размеры блока: без NaN/Inf и разноса.
 void automation (double sampleRate)
 {
@@ -457,9 +500,11 @@ void automation (double sampleRate)
     const auto any = [&] (const char* id) { auto* q = p.apvts.getParameter (id); q->setValueNotifyingHost (rng.nextFloat()); };
     for (int i = 0; i < 300; ++i)
     {
-        for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass" })
+        for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
+                         "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix" })
             any (id);
-        setParam (p, "delayOn", rng.nextBool() ? 1.0f : 0.0f);
+        for (auto id : { "delayOn", "chorusOn" })
+            setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
         fillNoise (buf, rng, 1.0f);
@@ -807,6 +852,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "eqLow", -3.0f);
     setParam (p, "delayOn", percent > 0.0f ? 1.0f : 0.0f);
     setParam (p, "delayFeedback", 0.9f * percent);
+    setParam (p, "chorusDepth", percent);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
@@ -846,6 +892,7 @@ int main (int argc, char** argv)
         run (sampleRate);
         equalizer (sampleRate);
         delayCar (sampleRate);
+        jucePedal (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
         automation (sampleRate);
         chainOrder (sampleRate);
     }

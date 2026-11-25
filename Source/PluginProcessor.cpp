@@ -70,6 +70,7 @@ GentraAudioProcessor::GentraAudioProcessor()
                         Stage::keep (Stage::main) | Stage::keep (Stage::extraA) | Stage::keep (Stage::extraB) | Stage::keep (Stage::extraC),
                         "eqMid", 1.0f)),
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
+      blue (makeStage ("chorusDepth", 0.01f, "chorusRate", 1.0f, "chorusFeedback", 0.01f, "chorusMix", "chorusOn", Stage::keep (Stage::main))),
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
@@ -114,12 +115,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::NormalisableRange<float> delayMs (60.0f, 600.0f, 1.0f);
     delayMs.setSkewForCentre (200.0f);
 
+    juce::NormalisableRange<float> lfoHz (0.1f, 8.0f, 0.01f);
+    lfoHz.setSkewForCentre (1.0f);
+    const auto hz = Attributes().withLabel ("Hz");
+    const juce::NormalisableRange<float> feedback (0.0f, 90.0f, 0.1f);
+
     juce::StringArray notes;
     for (const auto* name : gentra::delayDivisionNames)
         notes.add (name);
 
     // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом,
-    // 3 — красная, белая и серебряная машины.
+    // 3 — красная, белая и серебряная машины, 4 — синяя, розовая и серая.
     juce::AudioProcessorValueTreeState::ParameterLayout layout {
         std::make_unique<Float> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "bassFreq", 2 }, "Bass Freq",
@@ -156,7 +162,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         // По умолчанию время — длительность ноты по темпу хоста; «По такту» выключен — миллисекунды.
         std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "delaySync", 3 }, "Delay Sync", true),
         std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "delayNote", 3 }, "Delay Note", notes, gentra::defaultDelayDivision),
-        std::make_unique<Float> (juce::ParameterID { "delayTime", 3 }, "Delay Time", delayMs, 250.0f, Attributes().withLabel ("ms"))
+        std::make_unique<Float> (juce::ParameterID { "delayTime", 3 }, "Delay Time", delayMs, 250.0f, Attributes().withLabel ("ms")),
+
+        std::make_unique<Float> (juce::ParameterID { "chorusDepth", 4 }, "Chorus Depth", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "chorusRate", 4 }, "Chorus Rate", lfoHz, 1.0f, hz),
+        std::make_unique<Float> (juce::ParameterID { "chorusFeedback", 4 }, "Chorus Feedback", feedback, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "chorusMix", 4 }, "Chorus Mix", percent, 50.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "chorusOn", 4 }, "Chorus On", true)
     };
     return layout;
 }
@@ -178,6 +190,10 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     silver.prepare (sampleRate);
     eq.prepare (sampleRate);
     delay.prepare (sampleRate);
+    const juce::dsp::ProcessSpec spec { sampleRate, static_cast<juce::uint32> (fxChunk), static_cast<juce::uint32> (gentra::maxChannels) };
+    blue.prepare (sampleRate);
+    chorus.prepare (spec);
+    chorus.setMix (1.0f); // Mix — свой, посэмплово
     chainGain.reset (sampleRate, 0.01);
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
@@ -192,12 +208,14 @@ void GentraAudioProcessor::reset()
     driveEngaged.setCurrentAndTargetValue (0.0f);
     eq.reset();
     delay.reset();
+    chorus.reset();
     meterLp = 0.0f;
     black.snap();
     rust.snap();
     red.snap();
     white.snap();
     silver.snap();
+    blue.snap();
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
 }
@@ -268,7 +286,62 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
             break;
         case gentra::car::white: processEq (buffer, numChannels); break;
         case gentra::car::silver: processDelay (buffer, numChannels); break;
+        case gentra::car::blue:
+            processChunked (blue, buffer, numChannels,
+                            [this] (juce::dsp::AudioBlock<float>& block, float depth, float rate, float feedback)
+                            {
+                                chorus.setDepth (depth);
+                                chorus.setRate (rate);
+                                chorus.setFeedback (feedback);
+                                chorus.process (juce::dsp::ProcessContextReplacing<float> (block));
+                            },
+                            [this] { chorus.reset(); });
+            break;
         default: break;
+    }
+}
+
+template <typename Apply, typename Reset>
+void GentraAudioProcessor::processChunked (Stage& s, juce::AudioBuffer<float>& buffer, int numChannels, Apply&& apply, Reset&& reset) noexcept
+{
+    s.updateTargets();
+    if (! s.active() || numChannels == 0)
+    {
+        reset();
+        s.skip (buffer.getNumSamples());
+        return;
+    }
+
+    auto* const* data = buffer.getArrayOfWritePointers();
+    std::array<std::array<float, fxChunk>, gentra::maxChannels> wetSignal;
+    std::array<float*, gentra::maxChannels> ptrs { wetSignal[0].data(), wetSignal[1].data() };
+    std::array<float, fxChunk> wet {};
+
+    for (int start = 0; start < buffer.getNumSamples(); start += fxChunk)
+    {
+        const int n = juce::jmin (fxChunk, buffer.getNumSamples() - start);
+        float main = 0.0f, a = 0.0f, b = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            main = s.next (Stage::main);
+            a = s.next (Stage::extraA);
+            b = s.next (Stage::extraB);
+            // Эффект плавно входит на первых процентах главной ручки: у этих блоков и около нуля есть окраска.
+            wet[static_cast<size_t> (i)] = s.next (Stage::wet) * juce::jmin (1.0f, main / gentra::fadeIn);
+        }
+
+        for (int ch = 0; ch < gentra::maxChannels; ++ch) // моно — дублируем первый канал
+            std::copy_n (data[juce::jmin (ch, numChannels - 1)] + start, n, wetSignal[static_cast<size_t> (ch)].data());
+        juce::dsp::AudioBlock<float> block (ptrs.data(), static_cast<size_t> (gentra::maxChannels), static_cast<size_t> (n));
+        apply (block, main, a, b);
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            float* y = data[ch] + start;
+            const auto& w = wetSignal[static_cast<size_t> (ch)];
+            for (int i = 0; i < n; ++i)
+                y[i] += wet[static_cast<size_t> (i)] * (w[static_cast<size_t> (i)] - y[i]);
+        }
     }
 }
 
@@ -549,11 +622,12 @@ void GentraAudioProcessor::setCarOrder (const CarOrder& order)
 
 void GentraAudioProcessor::storeChain (const CarOrder& order) noexcept
 {
+    namespace c = gentra::car;
+    constexpr int sounding = (1 << c::black) | (1 << c::rustCar) | (1 << c::red) | (1 << c::white) | (1 << c::silver) | (1 << c::blue);
     std::uint64_t packed = 0;
     int shift = 0;
     for (int car : order)
-        if (car == gentra::car::black || car == gentra::car::rustCar || car == gentra::car::red
-            || car == gentra::car::white || car == gentra::car::silver)
+        if ((sounding >> car) & 1)
         {
             packed |= static_cast<std::uint64_t> (car + 1) << shift;
             shift += 4;

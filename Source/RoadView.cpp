@@ -192,6 +192,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[red] = { "drive", "ДРАЙВ", "%", 0, false, "distMix", "distOn" };
     w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
     w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
+    w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
     return w;
 }();
 
@@ -270,6 +271,8 @@ float RoadView::strength (int car) const
                * param ("eqMix") * 0.01f;
     if (car == silver)
         return param ("delayMix") * 0.01f * (0.5f + 0.5f * param ("delayFeedback") / 90.0f);
+    if (car == blue)
+        return param ("chorusDepth") * 0.01f * param ("chorusMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -860,13 +863,15 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         p.addTriangle (e.x + 0.005f, e.y - 0.025f, e.x - 0.005f - len, e.y, e.x + 0.005f, e.y + 0.025f);
         g.fillPath (p);
     }
-    else if (i == blue)
+    else if (i == blue && strength (blue) > 0.0f)
     {
+        // Волна за машиной: размах от глубины и Mix, бег — со скоростью хоруса.
+        const float amp = 0.05f * strength (blue), run = time * 2.0f * pi * param ("chorusRate");
         juce::Path p;
         for (int n = 0; n <= 20; ++n)
         {
             const float fn = static_cast<float> (n);
-            const float y = 0.13f + std::sin (fn * 0.9f - time * 3.6f) * 0.09f * 0.4f * 0.5f * (fn / 20.0f + 0.2f);
+            const float y = 0.13f + std::sin (fn * 0.9f - run) * amp * (fn / 20.0f + 0.2f);
             if (n == 0) p.startNewSubPath (0.0f, y);
             else p.lineTo (-fn * 0.04f, y);
         }
