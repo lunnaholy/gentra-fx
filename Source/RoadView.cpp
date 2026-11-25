@@ -137,9 +137,8 @@ juce::Image asset (const char* name) { return RoadView::image (name); }
 
 const juce::Identifier hiddenId { "hiddenCars" };   // битовая маска скрытых машин в состоянии плагина
 const juce::Identifier hiddenOffId { "hiddenOff" }; // какие из них были выключены до скрытия
-// Все 12 в ширину экрана — тесно, быстрые моргают треть времени. По умолчанию три машины в гараже (UI-11),
-// с ними моргание ~5–7% времени.
-constexpr int defaultHidden = (1 << green) | (1 << orange) | (1 << purple);
+// Новый экземпляр — чистый лист: по дороге едет одна чёрная Gentra (на нуле), остальные ждут в гараже.
+constexpr int defaultHidden = ((1 << count) - 1) & ~(1 << black);
 
 float posMod (float a, float n)
 {
@@ -323,7 +322,12 @@ void RoadView::setHidden (int car, bool hide)
     if (isWorking (car))
         if (auto* on = apvts.getParameter (working[static_cast<size_t> (car)].on))
         {
-            const int offMask = static_cast<int> (apvts.state.getProperty (hiddenOffId, 0));
+            // Кто ни разу не был на дороге, возвращается в своём состоянии по умолчанию (дилей — выключенным).
+            int defaultOff = 0;
+            for (int c = 0; c < numCars; ++c)
+                if (auto* p = apvts.getParameter (working[static_cast<size_t> (c)].on); p != nullptr && p->getDefaultValue() < 0.5f)
+                    defaultOff |= 1 << c;
+            const int offMask = static_cast<int> (apvts.state.getProperty (hiddenOffId, defaultOff));
             if (hide && ! ((mask >> car) & 1)) // повторное скрытие не затирает запомненное
                 apvts.state.setProperty (hiddenOffId, isOn (car) ? offMask & ~(1 << car) : offMask | (1 << car), nullptr);
             on->beginChangeGesture();

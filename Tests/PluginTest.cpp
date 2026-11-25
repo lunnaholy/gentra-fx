@@ -989,6 +989,8 @@ void traffic()
     setParam (p, "chorusDepth", 25.6f);
     setParam (p, "reverbSize", 55.0f);
     setParam (p, "gateOn", 0.0f);
+    // По умолчанию на дороге одна чёрная; шашки проверяем на полной дороге — в гараже только три машины.
+    p.apvts.state.setProperty ("hiddenCars", (1 << 3) | (1 << 4) | (1 << 5), nullptr);
     for (int car : { -1, 0 })
     {
         RoadView road (p.apvts, nullptr);
@@ -1034,6 +1036,14 @@ void garage()
     GentraAudioProcessor p;
     {
         RoadView road (p.apvts, nullptr);
+        // Новый экземпляр: на дороге одна чёрная Gentra на нуле, остальные — в гараже.
+        CHECK (! road.isHidden (gentra::car::black) && p.apvts.getRawParameterValue ("bass")->load() <= 0.0f);
+        for (int car = 1; car < RoadView::numCars; ++car)
+            CHECK (road.isHidden (car));
+        for (int car = 1; car < RoadView::numCars; ++car) // все на дорогу
+            road.setHidden (car, false);
+        CHECK (p.apvts.getRawParameterValue ("loresOn")->load() > 0.5f);  // выехала включённой, как по умолчанию
+        CHECK (p.apvts.getRawParameterValue ("delayOn")->load() < 0.5f);  // дилей по умолчанию выключен — так и выехал
         road.select (0);
         road.setHidden (0, true);
         road.setHidden (5, true);
