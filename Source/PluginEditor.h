@@ -28,6 +28,24 @@ struct Box final : juce::Component
     juce::Image image = RoadView::image ("panel_png");
 };
 
+// «О плагине»: затемнение на всё окно и металлическая табличка с названием, версией, ссылками и копирайтом.
+// Закрывается крестиком или кликом мимо таблички.
+class AboutBox final : public juce::Component
+{
+public:
+    AboutBox();
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+    juce::ImageButton close;
+
+private:
+    juce::Rectangle<int> panel() const;
+    std::vector<std::unique_ptr<juce::HyperlinkButton>> links;
+    juce::Image image = RoadView::image ("panel_png");
+};
+
 // Вход и выход всей цепочки: гейн в дБ (двойной клик — 0) и индикаторы пика L/R со спадом, удержанием пика
 // и лампой перегруза. Металлическая табличка сверху посередине.
 class IoPanel final : public juce::Component, private juce::Timer
@@ -144,6 +162,8 @@ public:
     void select (int car) { road.select (car); }
     void openGarage() { showGarage (true, false); }
     EqGraph& getEqGraph() { return eqGraph; }
+    void showAbout (bool show);
+    bool isAboutShown() const { return about.isVisible(); }
 
     // Общие настройки пользователя (масштаб окна); тест подменяет файл, чтобы не трогать настоящий.
     static juce::File settingsFile;
@@ -182,6 +202,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 
     IoPanel io;
+    AboutBox about;
 
     // Гараж: какие машины на дороге.
     juce::TextButton garageButton;

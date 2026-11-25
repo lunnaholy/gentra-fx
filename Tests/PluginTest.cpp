@@ -1108,6 +1108,31 @@ void ioGain()
     CHECK (transparent (p, rng)); // в нуле — побитово
 }
 
+// Номер в углу: клик открывает «О плагине», клик мимо — нет; номер качается от баса.
+void logoPlate()
+{
+    GentraAudioProcessor p;
+    float bass = 0.0f;
+    RoadView road (p.apvts, [&bass] { return bass; });
+    int clicks = 0;
+    road.onLogoClicked = [&clicks] { ++clicks; };
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto click = [&] (juce::Point<float> at)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        road.mouseDown (juce::MouseEvent (source, at, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &road, &road, now, at, now, 1, false));
+    };
+    click ({ 100.0f, 24.0f }); // середина номера
+    click ({ 450.0f, 300.0f });
+    CHECK (clicks == 1);
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+    auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
+    CHECK (gentra != nullptr && ! gentra->isAboutShown());
+    gentra->showAbout (true);
+    CHECK (gentra->isAboutShown());
+}
+
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
 
 void beatSync()
@@ -1208,7 +1233,9 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
     CHECK (gentra != nullptr);
-    if (car <= -2) // гараж с парой скрытых машин; −3 и дальше — плюс открытая машина −car − 3
+    if (car == -99) // «О плагине»
+        gentra->showAbout (true);
+    else if (car <= -2) // гараж с парой скрытых машин; −3 и дальше — плюс открытая машина −car − 3
     {
         const int open = car <= -3 ? -car - 3 : -1; // открытую не прячем
         p.apvts.state.setProperty ("hiddenCars", ((1 << 3) | (1 << 7)) & ~(open >= 0 ? 1 << open : 0), nullptr);
@@ -1269,6 +1296,7 @@ int main (int argc, char** argv)
     garagePanel();
     eqGraph();
     ioGain();
+    logoPlate();
     beatSync();
 
     std::printf ("OK\n");

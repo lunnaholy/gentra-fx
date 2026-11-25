@@ -55,6 +55,7 @@ public:
     void select (int car); // -1 — ничего не выбрано
     int getSelected() const noexcept { return selected; }
     std::function<void (int)> onSelectionChanged;
+    std::function<void()> onLogoClicked; // клик по номеру в углу
 
     void advance (float dt); // один шаг анимации; публичный, чтобы тест мог прокрутить сцену
 
@@ -127,6 +128,11 @@ private:
     int laneChanges = 0, yields = 0;
     int hiddenMask = 0; // копия маски из состояния на этот кадр
     bool hidden (int car) const noexcept { return (hiddenMask >> car) & 1; }
+    // Номер в углу висит на левом болте: качается на пружине, от баса раскачивается, под мышью приподнимается.
+    float plateAngle = -2.0f, plateSpin = 0.0f, plateLift = 0.0f; // градусы, градусы/с, 0..1
+    bool plateHover = false;
+    juce::AffineTransform plateTransform() const; // из рамки 190×36 в окно
+    bool onPlate (juce::Point<float>) const;
     float rumble = 0.0f;            // сила тряски в этом кадре
     float bassHold = 0.0f;          // уровень низа, удерживаемый между долями
     float pulse = 0.0f;             // фаза доли 0..1 (на стопе — свои 2 Гц): саб, аварийка

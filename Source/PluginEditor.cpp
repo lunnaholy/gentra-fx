@@ -126,6 +126,78 @@ void Box::paint (juce::Graphics& g)
     drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
 }
 
+// ---------------- о плагине ----------------
+
+namespace
+{
+// Ссылки окна «О плагине». Пустой адрес — заглушка: строка видна, но не кликается.
+const std::array<std::pair<const char*, const char*>, 4> aboutLinks { {
+    { "Официальный сайт", "https://sauce.emeel.fyi/gentra-fx" },
+    { "Telegram", "" },
+    { "YouTube", "" },
+    { "GitHub", "" },
+} };
+constexpr int aboutW = 440, aboutH = 330;
+constexpr juce::uint32 aboutInk = 0xff15161a;
+}
+
+AboutBox::AboutBox()
+{
+    for (const auto& [name, url] : aboutLinks)
+    {
+        const bool ready = juce::String (url).isNotEmpty();
+        auto link = std::make_unique<juce::HyperlinkButton> (ru (name) + (ready ? juce::String() : ru (" — скоро")),
+                                                             ready ? juce::URL (url) : juce::URL());
+        link->setFont (RoadView::font (19.0f), false);
+        link->setColour (juce::HyperlinkButton::textColourId, ready ? juce::Colour (0xff1d4f9a) : juce::Colour (aboutInk).withAlpha (0.4f));
+        link->setEnabled (ready);
+        addAndMakeVisible (*link);
+        links.push_back (std::move (link));
+    }
+    close.setTitle (ru ("Закрыть"));
+    addAndMakeVisible (close);
+    setTitle (ru ("О плагине"));
+}
+
+juce::Rectangle<int> AboutBox::panel() const
+{
+    return getLocalBounds().withSizeKeepingCentre (aboutW, aboutH);
+}
+
+void AboutBox::resized()
+{
+    const auto p = panel();
+    close.setBounds (p.getRight() - 34 - 36, p.getY() + 16, 36, 30);
+    for (size_t i = 0; i < links.size(); ++i)
+        links[i]->setBounds (p.getX() + 60, p.getY() + 122 + 30 * static_cast<int> (i), aboutW - 120, 26);
+}
+
+void AboutBox::mouseDown (const juce::MouseEvent& e)
+{
+    if (! panel().contains (e.getPosition()))
+        setVisible (false);
+}
+
+void AboutBox::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (0.55f));
+    const auto p = panel().toFloat();
+    g.setOpacity (1.0f);
+    drawNine (g, image, p, 70, 35.0f);
+
+    const auto line = [&] (const juce::String& text, float size, float y, float alpha)
+    {
+        g.setColour (juce::Colour (aboutInk).withAlpha (alpha));
+        g.setFont (RoadView::font (size));
+        g.drawText (text, p.withY (p.getY() + y).withHeight (size + 6.0f).reduced (40.0f, 0.0f), juce::Justification::centred);
+    };
+    line ("Sauce Gentra FX", 34.0f, 26.0f, 1.0f);
+    line (ru ("Версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
+    line (ru ("12 машин — 12 эффектов. Порядок цепочки — в гараже."), 16.0f, 88.0f, 0.8f);
+    line (ru ("© 2026 lunnaholy"), 18.0f, p.getHeight() - 76.0f, 1.0f);
+    line (ru ("Шрифт PT Sans Narrow — ParaType Free Font License. Сделано на JUCE."), 12.5f, p.getHeight() - 50.0f, 0.55f);
+}
+
 // ---------------- вход и выход ----------------
 
 IoPanel::IoPanel (GentraAudioProcessor& p) : processor (p)
@@ -701,6 +773,12 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     garage.close.setImages (false, true, true, close, 1.0f, {}, close, 1.0f, shade, close, 1.0f, juce::Colours::black.withAlpha (0.3f));
     garage.close.onClick = [this] { showGarage (false); };
     content.addAndMakeVisible (garage);
+
+    // «О плагине» — по клику на номер, поверх всего.
+    about.close.setImages (false, true, true, close, 1.0f, {}, close, 1.0f, shade, close, 1.0f, juce::Colours::black.withAlpha (0.3f));
+    about.close.onClick = [this] { showAbout (false); };
+    road.onLogoClicked = [this] { showAbout (true); };
+    content.addChildComponent (about);
     layoutContent();
 
     // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер один на все проекты —
@@ -757,6 +835,14 @@ void GentraAudioProcessorEditor::layoutContent()
     rotate (garageButton, 1.2f);
 
     garage.setBounds (garageArea (garageOpen));
+    about.setBounds (content.getLocalBounds());
+}
+
+void GentraAudioProcessorEditor::showAbout (bool show)
+{
+    about.setVisible (show);
+    if (show)
+        about.toFront (true);
 }
 
 juce::Rectangle<int> GentraAudioProcessorEditor::garageArea (bool open)

@@ -625,6 +625,14 @@ void RoadView::advance (float dt)
     }
     shake = { rumble * shakePx * 0.4f * (rng.nextFloat() * 2.0f - 1.0f), rumble * shakePx * (rng.nextFloat() * 2.0f - 1.0f) };
 
+    // Номер на болте: пружина к покою, покой медленно гуляет, бас подталкивает. Под мышью — приподнимается.
+    {
+        const float rest = -2.0f + 1.2f * std::sin (time * 0.9f);
+        plateSpin += (-30.0f * (plateAngle - rest) - 4.0f * plateSpin + 260.0f * rumble) * dt;
+        plateAngle = juce::jlimit (-12.0f, 8.0f, plateAngle + plateSpin * dt);
+        plateLift += ((plateHover ? 1.0f : 0.0f) - plateLift) * juce::jmin (1.0f, dt * 12.0f);
+    }
+
     place();
     repaint();
 }
@@ -711,18 +719,28 @@ juce::RangedAudioParameter* RoadView::knobParam (int w) const
 
 void RoadView::mouseMove (const juce::MouseEvent& e)
 {
-    hovered = carAt (e.position);
-    const bool clickable = wheelAt (e.position) >= 0 || isWorking (hovered);
+    plateHover = onPlate (e.position);
+    hovered = plateHover ? -1 : carAt (e.position);
+    const bool clickable = plateHover || wheelAt (e.position) >= 0 || isWorking (hovered);
     setMouseCursor (clickable ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 }
 
 void RoadView::mouseExit (const juce::MouseEvent&)
 {
     hovered = -1;
+    plateHover = false;
 }
 
 void RoadView::mouseDown (const juce::MouseEvent& e)
 {
+    if (onPlate (e.position))
+    {
+        plateSpin += 120.0f; // щелчок — номер качнулся
+        if (onLogoClicked)
+            onLogoClicked();
+        return;
+    }
+
     if (const int w = wheelAt (e.position); w >= 0)
     {
         auto* p = knobParam (w);
@@ -1062,16 +1080,59 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
     }
 }
 
+namespace
+{
+constexpr float plateW = 190.0f, plateH = 36.0f;
+constexpr juce::Point<float> platePivot { 14.0f, 18.0f }; // левый болт, в координатах номера
+}
+
+juce::AffineTransform RoadView::plateTransform() const
+{
+    const float lift = 1.0f + 0.05f * plateLift;
+    return juce::AffineTransform::scale (lift, lift, platePivot.x, platePivot.y)
+        .rotated (plateAngle * pi / 180.0f, platePivot.x, platePivot.y)
+        .translated (6.0f, 6.0f - 2.0f * plateLift);
+}
+
+bool RoadView::onPlate (juce::Point<float> p) const
+{
+    return juce::Rectangle<float> (plateW, plateH).contains (p.transformedBy (plateTransform().inverted()));
+}
+
 void RoadView::drawOverlays (juce::Graphics& g) const
 {
-    // Номер в углу
+    // Номер в углу: качается, по нему пробегает блик (под мышью — чаще); клик — «О плагине».
     if (plate.isValid())
     {
-        const float pw = 190.0f, ph = 36.0f;
+        const auto t = plateTransform();
+        if (plateLift > 0.01f) // приподнятый отбрасывает тень
+        {
+            juce::Path shadow;
+            shadow.addRoundedRectangle (0.0f, 0.0f, plateW, plateH, 5.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.35f * plateLift));
+            g.fillPath (shadow, t.translated (2.0f, 5.0f * plateLift));
+        }
         g.setOpacity (1.0f);
-        g.drawImageTransformed (plate, juce::AffineTransform::scale (pw / static_cast<float> (plate.getWidth()), ph / static_cast<float> (plate.getHeight()))
-                                           .translated (6.0f, 6.0f)
-                                           .rotated (-2.0f * pi / 180.0f, 6.0f + pw * 0.5f, 6.0f + ph * 0.5f));
+        g.drawImageTransformed (plate, juce::AffineTransform::scale (plateW / static_cast<float> (plate.getWidth()),
+                                                                     plateH / static_cast<float> (plate.getHeight()))
+                                           .followedBy (t));
+
+        const float period = plateHover ? 1.4f : 5.0f, sweep = std::fmod (time, period) / 0.7f;
+        if (sweep < 1.0f)
+        {
+            juce::Graphics::ScopedSaveState s (g);
+            juce::Path shape;
+            shape.addRoundedRectangle (0.0f, 0.0f, plateW, plateH, 5.0f);
+            g.reduceClipRegion (shape, t);
+            g.addTransform (t);
+            const float x = -60.0f + (plateW + 120.0f) * sweep;
+            juce::ColourGradient glint (juce::Colours::white.withAlpha (0.0f), x - 30.0f, 0.0f, juce::Colours::white.withAlpha (0.0f), x + 30.0f, 0.0f, false);
+            glint.addColour (0.5, juce::Colours::white.withAlpha (0.55f));
+            g.setGradientFill (glint);
+            juce::Path band; // косая полоса
+            band.addQuadrilateral (x - 30.0f, plateH, x + 6.0f, 0.0f, x + 36.0f, 0.0f, x, plateH);
+            g.fillPath (band);
+        }
     }
 
     // Плашка над машиной: открытой или под мышью
