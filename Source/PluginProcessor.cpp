@@ -43,17 +43,19 @@ void GentraAudioProcessor::Stage::skip (int numSamples) noexcept
 
 // Машина простаивает, когда звучать нечему (параметры из aliveMask в нуле) или нечем (wet в нуле) и ничего не едет.
 // Простаивающая стадия не трогает буфер — отсюда bit-perfect при 0%. Пустая aliveMask — звучит всегда (дилей).
-bool GentraAudioProcessor::Stage::active() const noexcept
+bool GentraAudioProcessor::Stage::active() noexcept
 {
-    bool hasEffect = aliveMask == 0;
+    bool hasEffect = aliveMask == 0, moving = value[wet].isSmoothing();
     for (int i : { main, extraA, extraB, extraC })
         if ((aliveMask >> i) & 1)
         {
-            if (value[static_cast<size_t> (i)].isSmoothing())
-                return true;
+            moving = moving || value[static_cast<size_t> (i)].isSmoothing();
             hasEffect = hasEffect || std::abs (value[static_cast<size_t> (i)].getTargetValue()) > 0.0f;
         }
-    return value[wet].isSmoothing() || (hasEffect && value[wet].getTargetValue() > 0.0f);
+    const bool now = moving || (hasEffect && value[wet].getTargetValue() > 0.0f);
+    wentIdle = wasActive && ! now;
+    wasActive = now;
+    return now;
 }
 
 // ---------------- Processor ----------------
@@ -538,7 +540,8 @@ void GentraAudioProcessor::processComp (juce::AudioBuffer<float>& buffer, int nu
     pink.updateTargets();
     if (! pink.active())
     {
-        comp.reset();
+        if (pink.wentIdle)
+            comp.reset();
         pink.skip (buffer.getNumSamples());
         compLevel.store (0.0f, std::memory_order_relaxed);
         return;
@@ -570,7 +573,8 @@ void GentraAudioProcessor::processTape (juce::AudioBuffer<float>& buffer, int nu
     green.updateTargets();
     if (! green.active() || getSampleRate() <= 0.0)
     {
-        tape.reset();
+        if (green.wentIdle)
+            tape.reset();
         tapeState = TapeState::playing;
         tapeSpeed = 1.0;
         green.skip (buffer.getNumSamples());
@@ -720,7 +724,8 @@ void GentraAudioProcessor::processChunked (Stage& s, juce::AudioBuffer<float>& b
     s.updateTargets();
     if (! s.active() || numChannels == 0)
     {
-        reset();
+        if (s.wentIdle)
+            reset();
         s.skip (buffer.getNumSamples());
         return;
     }
@@ -763,7 +768,8 @@ void GentraAudioProcessor::processBass (juce::AudioBuffer<float>& buffer, int nu
     black.updateTargets();
     if (! black.active())
     {
-        bass.reset();
+        if (black.wentIdle)
+            bass.reset();
         black.skip (buffer.getNumSamples());
         return;
     }
@@ -789,7 +795,8 @@ void GentraAudioProcessor::processLores (juce::AudioBuffer<float>& buffer, int n
     rust.updateTargets();
     if (! rust.active())
     {
-        lores.reset();
+        if (rust.wentIdle)
+            lores.reset();
         rust.skip (buffer.getNumSamples());
         return;
     }
@@ -878,7 +885,8 @@ void GentraAudioProcessor::processEq (juce::AudioBuffer<float>& buffer, int numC
         eqShape[i].setTargetValue (eqShapeRaw[i]->load());
     if (! white.active())
     {
-        eq.reset();
+        if (white.wentIdle)
+            eq.reset();
         white.skip (buffer.getNumSamples());
         for (auto& v : eqShape)
             v.skip (buffer.getNumSamples());
@@ -940,22 +948,23 @@ void GentraAudioProcessor::processDelay (juce::AudioBuffer<float>& buffer, int n
 
 double GentraAudioProcessor::getTailLengthSeconds() const
 {
-    const auto value = [this] (const char* id) { return static_cast<double> (apvts.getRawParameterValue (id)->load()); };
+    // Хост может звать это с аудиопотока на каждом блоке — читаем готовые указатели, без поиска параметра по имени.
+    const auto value = [] (const Stage& s, int i) { return static_cast<double> (s.raw[static_cast<size_t> (i)]->load()); };
     const auto toMinus60 = [] (double feedback) { return feedback > 0.0 ? std::log (0.001) / std::log (feedback) : 0.0; };
 
     // Дилей: пока повторы не затихнут до −60 дБ.
     double tail = 0.0;
-    if (value ("delayOn") > 0.5 && value ("delayMix") > 0.0)
+    if (silver.on->load() > 0.5f && value (silver, Stage::wet) > 0.0)
     {
         const double seconds = delaySync->load() > 0.5f
                                    ? gentra::delayDivisionSeconds (delayNote->load(), hostBpm.load (std::memory_order_relaxed))
-                                   : value ("delayTime") * 0.001;
-        tail = juce::jmin (gentra::delayMaxSeconds, seconds) * (1.0 + toMinus60 (value ("delayFeedback") * 0.01));
+                                   : value (silver, Stage::main) * 0.001;
+        tail = juce::jmin (gentra::delayMaxSeconds, seconds) * (1.0 + toMinus60 (value (silver, Stage::extraA) * 0.01));
     }
 
     // Реверб: самая длинная гребёнка Freeverb (1617 сэмплов при 44.1 кГц) с его обратной связью roomSize·0.28 + 0.7
     // (константы из juce_Reverb.h) — до −60 дБ, плюс пре-дилей.
-    if (const double size = value ("reverbSize") * 0.01; value ("reverbOn") > 0.5 && value ("reverbMix") > 0.0 && size > 0.0)
+    if (const double size = value (grey, Stage::main) * 0.01; grey.on->load() > 0.5f && value (grey, Stage::wet) > 0.0 && size > 0.0)
         tail = juce::jmax (tail, size * gentra::reverbPreDelayMaxSeconds + 1617.0 / 44100.0 * toMinus60 (size * 0.28 + 0.7));
     return tail;
 }

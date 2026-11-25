@@ -81,7 +81,10 @@ private:
         void snap() noexcept;
         void updateTargets() noexcept;
         void skip (int numSamples) noexcept;
-        bool active() const noexcept;
+        bool active() noexcept;
+        // Первый простаивающий блок после звучащих: состояние эффекта сбрасывается на нём один раз, а не каждый блок
+        // (линия ленты — 10 секунд на канал, обнулять её на каждом блоке дороже всей остальной обработки).
+        bool wentIdle = false, wasActive = true;
         float next (int i) noexcept { return value[static_cast<size_t> (i)].getNextValue(); }
     };
 
