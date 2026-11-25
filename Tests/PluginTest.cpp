@@ -758,7 +758,7 @@ void panCar (double sampleRate)
     juce::MidiBuffer midi;
     CHECK (p.apvts.getParameter ("panNote")->getCurrentValueAsText() == "1/2");
     setParam (p, "panShape", 3.0f); // пинг-понг
-    CHECK (p.apvts.getParameter ("panShape")->getCurrentValueAsText() == juce::String::fromUTF8 ("Пинг-понг"));
+    CHECK (p.apvts.getParameter ("panShape")->getCurrentValueAsText() == juce::String::fromUTF8 ("пинг-понг"));
     setParam (p, "panDepth", 100.0f);
     p.reset();
 

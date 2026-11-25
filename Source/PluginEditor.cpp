@@ -23,18 +23,18 @@ struct Extra
 const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
 {
     std::array<std::array<Extra, 3>, RoadView::numCars> e {};
-    e[0] = { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 }, {} } };
-    e[1] = { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 }, {} } };
-    e[2] = { { { "distTone", "Тон", "%", 0 }, {}, {} } };
-    e[3] = { { { "tapeStartTime", "Разгон", "мс", 0, false, "tapeStartNote" }, { "tapeCurve", "Кривая", "%", 0, true }, {} } };
-    e[4] = { { { "panNote", "Шаг", "", 0 }, { "panShape", "Форма", "", 0 }, { "panWidth", "Ширина", "%", 0, true } } };
-    e[5] = { { { "sidechainNote", "Шаг", "", 0 }, { "sidechainShape", "Форма", "%", 0 }, { "sidechainOffset", "Сдвиг", "%", 0, true } } };
-    e[6] = { { { "chorusRate", "Скорость", "Гц", 2 }, { "chorusFeedback", "Возврат", "%", 0 }, {} } };
-    e[7] = { { { "compAttack", "Атака", "мс", 1 }, { "compRelease", "Отпускание", "мс", 0 }, { "compRatio", "Степень", ": 1", 1 } } };
-    e[8] = { { { "delayFeedback", "Повторы", "%", 0 }, { "delayTone", "Тон", "%", 0 }, {} } };
-    e[9] = { { { "reverbDamping", "Глушение", "%", 0 }, {}, {} } };
-    e[10] = { { { "gateNote", "Шаг", "", 0 }, { "gateSmooth", "Плавность", "%", 0 }, {} } };
-    e[11] = { { { "eqLow", "Низ", "дБ", 1, true }, { "eqMid", "Середина", "дБ", 1, true }, { "eqHigh", "Верх", "дБ", 1, true } } };
+    e[0] = { { { "bassFreq", "частота", "гц", 0 }, { "tint", "тонировка", "%", 0 }, {} } };
+    e[1] = { { { "loresBits", "мин. биты", "бит", 1 }, { "loresRate", "мин. частота", "кгц", 1 }, {} } };
+    e[2] = { { { "distTone", "тон", "%", 0 }, {}, {} } };
+    e[3] = { { { "tapeStartTime", "разгон", "мс", 0, false, "tapeStartNote" }, { "tapeCurve", "кривая", "%", 0, true }, {} } };
+    e[4] = { { { "panNote", "шаг", "", 0 }, { "panShape", "форма", "", 0 }, { "panWidth", "ширина", "%", 0, true } } };
+    e[5] = { { { "sidechainNote", "шаг", "", 0 }, { "sidechainShape", "форма", "%", 0 }, { "sidechainOffset", "сдвиг", "%", 0, true } } };
+    e[6] = { { { "chorusRate", "скорость", "гц", 2 }, { "chorusFeedback", "возврат", "%", 0 }, {} } };
+    e[7] = { { { "compAttack", "атака", "мс", 1 }, { "compRelease", "отпускание", "мс", 0 }, { "compRatio", "степень", ": 1", 1 } } };
+    e[8] = { { { "delayFeedback", "повторы", "%", 0 }, { "delayTone", "тон", "%", 0 }, {} } };
+    e[9] = { { { "reverbDamping", "глушение", "%", 0 }, {}, {} } };
+    e[10] = { { { "gateNote", "шаг", "", 0 }, { "gateSmooth", "плавность", "%", 0 }, {} } };
+    e[11] = { { { "eqLow", "низ", "дб", 1, true }, { "eqMid", "середина", "дб", 1, true }, { "eqHigh", "верх", "дб", 1, true } } };
     return e;
 }();
 
@@ -160,10 +160,10 @@ namespace
 {
 // Ссылки окна «О плагине». Пустой адрес — заглушка: строка видна, но не кликается.
 const std::array<std::pair<const char*, const char*>, 4> aboutLinks { {
-    { "Официальный сайт", "https://sauce.emeel.fyi/gentra-fx" },
-    { "Telegram", "" },
-    { "YouTube", "" },
-    { "GitHub", "" },
+    { "официальный сайт", "https://sauce.emeel.fyi/gentra-fx" },
+    { "telegram", "" },
+    { "youtube", "" },
+    { "github", "" },
 } };
 constexpr int aboutW = 440, aboutH = 330;
 constexpr juce::uint32 aboutInk = 0xff15161a;
@@ -220,10 +220,10 @@ void AboutBox::paint (juce::Graphics& g)
         g.drawText (text, p.withY (p.getY() + y).withHeight (size + 6.0f).reduced (40.0f, 0.0f), juce::Justification::centred);
     };
     line ("Sauce Gentra FX", 34.0f, 26.0f, 1.0f);
-    line (ru ("Версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
+    line (ru ("версия ") + JucePlugin_VersionString, 15.0f, 66.0f, 0.6f);
     line (ru ("воой акя бу малибу ики турбоми??"), 17.0f, 90.0f, 0.85f);
     line (ru ("© 2026 lunnaholy"), 18.0f, p.getHeight() - 76.0f, 1.0f);
-    line (ru ("Шрифт PT Sans Narrow — ParaType Free Font License. Сделано на JUCE."), 12.5f, p.getHeight() - 50.0f, 0.55f);
+    line (ru ("шрифт pt sans narrow — paratype free font license. сделано на juce."), 12.5f, p.getHeight() - 50.0f, 0.55f);
 }
 
 // ---------------- вход и выход ----------------
@@ -231,7 +231,7 @@ void AboutBox::paint (juce::Graphics& g)
 IoPanel::IoPanel (GentraAudioProcessor& p) : processor (p)
 {
     const char* ids[] { "inputGain", "outputGain" };
-    const char* names[] { "Вход", "Выход" };
+    const char* names[] { "вход", "выход" };
     for (size_t i = 0; i < sides.size(); ++i)
     {
         auto& s = sides[i];
@@ -247,7 +247,7 @@ IoPanel::IoPanel (GentraAudioProcessor& p) : processor (p)
         {
             if (std::abs (v) < 0.05)
                 v = 0.0;
-            return (v > 0.0 ? "+" : "") + juce::String (v, 1) + " " + ru ("дБ");
+            return (v > 0.0 ? "+" : "") + juce::String (v, 1) + " " + ru ("дб");
         };
         s.slider.updateText();
         s.slider.setDoubleClickReturnValue (true, 0.0);
@@ -689,10 +689,10 @@ void GaragePanel::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (ink));
     g.setFont (RoadView::font (28.0f));
-    g.drawText (ru ("Гараж"), 26, 12, 200, 32, juce::Justification::centredLeft);
+    g.drawText (ru ("гараж"), 26, 12, 200, 32, juce::Justification::centredLeft);
     g.setColour (juce::Colour (ink).withAlpha (0.6f));
     g.setFont (RoadView::font (14.0f));
-    g.drawText (ru ("Сверху вниз — порядок эффектов"), 26, 40, 220, 16, juce::Justification::centredLeft);
+    g.drawText (ru ("сверху вниз — порядок эффектов"), 26, 40, 220, 16, juce::Justification::centredLeft);
 
     const auto order = dragCar >= 0 ? dragOrder : processor.getCarOrder();
     moving = false;
@@ -866,7 +866,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     popup.addAndMakeVisible (closeButton);
 
     // «По такту» (дилей): металлическая табличка, включённая подсвечена.
-    syncButton.setButtonText (ru ("По такту"));
+    syncButton.setButtonText (ru ("по такту"));
     syncButton.setClickingTogglesState (true);
     syncButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     syncButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
@@ -876,7 +876,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     syncButton.onClick = [this] { showPopup (road.getSelected()); };
 
     // Педаль (тормоз ленты): нажата — подсвечена, как включённая табличка.
-    triggerButton.setButtonText (ru ("Тормоз"));
+    triggerButton.setButtonText (ru ("тормоз"));
     triggerButton.setClickingTogglesState (true);
     triggerButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     triggerButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
@@ -899,7 +899,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     content.addAndMakeVisible (io);
 
     // Гараж: кнопка в углу выдвигает панель справа; закрытая панель ждёт за правым краем.
-    garageButton.setButtonText (ru ("Гараж"));
+    garageButton.setButtonText (ru ("гараж"));
     garageButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     garageButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     garageButton.onClick = [this] { showGarage (! garageOpen); };

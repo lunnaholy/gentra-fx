@@ -75,39 +75,39 @@ struct CarInfo
 
 // Порядок и значения — как в прототипе.
 const std::array<CarInfo, RoadView::numCars> carInfo { {
-    { "car_black_png", "Саб и тонировка", "Gentra", 0xff1b1c21 },
+    { "car_black_png", "саб и тонировка", "gentra", 0xff1b1c21 },
     // Приора
-    { "car_rust_png", "Low-res", "Приора", 0xffb7a688,
+    { "car_rust_png", "low-res", "приора", 0xffb7a688,
       { 0.2171f, 0.8121f, 0.0813f, 0.0814f, { 0.94f, 0.2f }, { 0.04f, 0.215f }, { 0.73f, 0.193f }, { 0.05f, 0.105f } } },
     // Жигули
-    { "car_red_png", "Дисторшн", "Жигули", 0xffb3202a,
+    { "car_red_png", "дисторшн", "жигули", 0xffb3202a,
       { 0.2277f, 0.8369f, 0.0825f, 0.0823f, { 0.978f, 0.198f }, { 0.018f, 0.2f }, { 0.937f, 0.208f }, { 0.05f, 0.085f } } },
     // BYD Seagull: повторитель в зеркале
-    { "car_green_png", "Тормоз ленты", "BYD Seagull", 0xff1f8a3b,
+    { "car_green_png", "тормоз ленты", "byd seagull", 0xff1f8a3b,
       { 0.1619f, 0.8181f, 0.0959f, 0.0957f, { 0.93f, 0.222f }, { 0.07f, 0.305f }, { 0.635f, 0.29f }, { 0.04f, 0.1f } } },
     // Дамас, белый (был оранжевым): повторитель у передней стойки
-    { "car_orange_png", "Автопанорама", "Дамас", 0xffe8eaec,
+    { "car_orange_png", "автопанорама", "дамас", 0xffe8eaec,
       { 0.1956f, 0.7833f, 0.0923f, 0.0923f, { 0.98f, 0.23f }, { 0.022f, 0.26f }, { 0.558f, 0.355f }, { 0.04f, 0.11f } } },
     // Спарк, салатовый (был фиолетовым)
-    { "car_purple_png", "Сайдчейн", "Спарк", 0xff93c02e,
+    { "car_purple_png", "сайдчейн", "спарк", 0xff93c02e,
       { 0.1566f, 0.8265f, 0.098f, 0.098f, { 0.923f, 0.249f }, { 0.059f, 0.298f }, { 0.734f, 0.22f }, { 0.04f, 0.12f } } },
     // Hongqi E-QM5, чёрный (был синим): повторитель в зеркале
-    { "car_blue_png", "Хорус", "Hongqi E-QM5", 0xff15161a,
+    { "car_blue_png", "хорус", "hongqi e-qm5", 0xff15161a,
       { 0.2026f, 0.8118f, 0.0806f, 0.0805f, { 0.955f, 0.16f }, { 0.05f, 0.2f }, { 0.665f, 0.24f }, { 0.04f, 0.07f } } },
     // Лисян: повторитель в зеркале
-    { "car_pink_png", "Компрессор", "Лисян", 0xffff5fa2,
+    { "car_pink_png", "компрессор", "лисян", 0xffff5fa2,
       { 0.216f, 0.8189f, 0.0888f, 0.0889f, { 0.95f, 0.205f }, { 0.06f, 0.25f }, { 0.665f, 0.255f }, { 0.04f, 0.1f } } },
     // BYD Song Plus: повторитель в зеркале
-    { "car_silver_png", "Дилей", "BYD Song Plus", 0xffa3acb6,
+    { "car_silver_png", "дилей", "byd song plus", 0xffa3acb6,
       { 0.2124f, 0.814f, 0.0883f, 0.0882f, { 0.94f, 0.2f }, { 0.06f, 0.25f }, { 0.67f, 0.27f }, { 0.04f, 0.1f } } },
     // BYD Yuan Up: повторитель в зеркале
-    { "car_grey_png", "Реверб", "BYD Yuan Up", 0xff4d545c,
+    { "car_grey_png", "реверб", "byd yuan up", 0xff4d545c,
       { 0.1928f, 0.8344f, 0.0916f, 0.0914f, { 0.95f, 0.225f }, { 0.05f, 0.25f }, { 0.675f, 0.3f }, { 0.04f, 0.1f } } },
     // Zeekr 007: повторитель в зеркале
-    { "car_yellow_png", "Гейт", "Zeekr 007", 0xfff2c230,
+    { "car_yellow_png", "гейт", "zeekr 007", 0xfff2c230,
       { 0.2024f, 0.8086f, 0.0873f, 0.0872f, { 0.94f, 0.186f }, { 0.06f, 0.212f }, { 0.645f, 0.232f }, { 0.05f, 0.09f } } },
     // Нексия
-    { "car_white_png", "Эквалайзер", "Нексия", 0xffeef0f2,
+    { "car_white_png", "эквалайзер", "нексия", 0xffeef0f2,
       { 0.2234f, 0.8154f, 0.0796f, 0.0796f, { 0.947f, 0.183f }, { 0.038f, 0.205f }, { 0.737f, 0.197f }, { 0.05f, 0.1f } } },
 } };
 
@@ -251,18 +251,18 @@ void drawStrip (juce::Graphics& g, const RoadView::Fitted& img, float S, float s
 const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
 {
     std::array<Working, numCars> w {};
-    w[black] = { "bass", "САБ", "%", 0, false, "bassMix", "bassOn" };
-    w[rustCar] = { "lores", "LO-RES", "%", 0, false, "loresMix", "loresOn" };
-    w[red] = { "drive", "ДРАЙВ", "%", 0, false, "distMix", "distOn" };
-    w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
-    w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
-    w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
-    w[pink] = { "compAmount", "СЖАТИЕ", "%", 0, false, "compMix", "compOn" };
-    w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
-    w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
-    w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
-    w[green] = { "tapeStopTime", "ТОРМОЗ", "мс", 0, false, "tapeMix", "tapeOn", "tapeSync", "tapeStopNote", "tapeBrake" };
-    w[orange] = { "panDepth", "ГЛУБИНА", "%", 0, false, "panMix", "panOn" };
+    w[black] = { "bass", "саб", "%", 0, false, "bassMix", "bassOn" };
+    w[rustCar] = { "lores", "lo-res", "%", 0, false, "loresMix", "loresOn" };
+    w[red] = { "drive", "драйв", "%", 0, false, "distMix", "distOn" };
+    w[white] = { "eqVolume", "громкость", "дб", 1, true, "eqMix", "eqOn" };
+    w[silver] = { "delayTime", "время", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
+    w[blue] = { "chorusDepth", "глубина", "%", 0, false, "chorusMix", "chorusOn" };
+    w[pink] = { "compAmount", "сжатие", "%", 0, false, "compMix", "compOn" };
+    w[grey] = { "reverbSize", "размер", "%", 0, false, "reverbMix", "reverbOn" };
+    w[purple] = { "sidechainDepth", "глубина", "%", 0, false, "sidechainMix", "sidechainOn" };
+    w[yellow] = { "gateDepth", "глубина", "%", 0, false, "gateMix", "gateOn" };
+    w[green] = { "tapeStopTime", "тормоз", "мс", 0, false, "tapeMix", "tapeOn", "tapeSync", "tapeStopNote", "tapeBrake" };
+    w[orange] = { "panDepth", "глубина", "%", 0, false, "panMix", "panOn" };
     return w;
 }();
 
@@ -1253,7 +1253,7 @@ void RoadView::drawOverlays (juce::Graphics& g) const
             const auto* p = knobParam (w);
             const auto& info = working[static_cast<size_t> (selected)];
             const bool note = w == 0 && info.sync != nullptr && param (info.sync) > 0.5f;
-            const auto label = w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
+            const auto label = w == 0 ? ru (info.mainLabel) : juce::String ("mix");
             float v = p->convertFrom0to1 (p->getValue());
             if (std::abs (v) < 0.05f)
                 v = 0.0f; // без «-0.0»

@@ -36,8 +36,8 @@ constexpr std::array<double, numDelayDivisions> delayDivisionBeats {
     0.125, 1.0 / 6.0, 0.1875, 0.25, 1.0 / 3.0, 0.375, 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0
 };
 constexpr std::array<const char*, numDelayDivisions> delayDivisionNames {
-    "1/128", "1/64T", "1/128.", "1/64", "1/32T", "1/64.",
-    "1/32", "1/16T", "1/32.", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "1/2T", "1/4.", "1/2"
+    "1/128", "1/64t", "1/128.", "1/64", "1/32t", "1/64.",
+    "1/32", "1/16t", "1/32.", "1/16", "1/8t", "1/16.", "1/8", "1/4t", "1/8.", "1/4", "1/2t", "1/4.", "1/2"
 };
 constexpr int defaultDelayDivision = 12; // 1/8
 
@@ -84,7 +84,7 @@ inline double tapeCurveInverse (double value, double curve) noexcept
 
 // Автопанорама: форма движения (параметр «Форма» — индекс в этом списке).
 constexpr int numPanShapes = 5;
-constexpr std::array<const char*, numPanShapes> panShapeNames { "Синус", "Треугольник", "Пила", "Пинг-понг", "Случайно" };
+constexpr std::array<const char*, numPanShapes> panShapeNames { "синус", "треугольник", "пила", "пинг-понг", "случайно" };
 constexpr int defaultPanNote = 18;             // 1/2: туда и обратно за половинную
 constexpr double panSmoothSeconds = 0.004;     // сглаживание положения: пила, пинг-понг и случайная прыгают без щелчков
 

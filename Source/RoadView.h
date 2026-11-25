@@ -17,7 +17,7 @@ public:
     struct Working
     {
         const char* main = nullptr;  // параметр заднего колеса
-        const char* mainLabel = "";  // подпись под ним, заглавными: JUCE не меняет регистр кириллицы
+        const char* mainLabel = "";  // подпись под ним; все надписи интерфейса — строчными, заглавные только в логотипе
         const char* mainUnit = "%";  // единица значения под колесом
         int mainDecimals = 0;
         bool bipolar = false;        // ручка от минуса до плюса: дуга и подпись — от середины, со знаком
