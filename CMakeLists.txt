@@ -66,7 +66,9 @@ target_link_libraries(SauceGentraFX
         juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
+        # У MSVC оптимизация при линковке заново генерирует весь JUCE для каждой цели — по четыре минуты на VST3,
+        # Standalone и тест; заметной прибавки скорости плагину она не даёт.
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:juce::juce_recommended_lto_flags>
         juce::juce_recommended_warning_flags)
 
 # Самопроверка: гоняет настоящий AudioProcessor без хоста. Запуск: ctest --test-dir build

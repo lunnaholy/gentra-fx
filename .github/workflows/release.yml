@@ -37,6 +37,8 @@ jobs:
           fi
 
       - name: Build
+        env:
+          CL: /MP # MSVC: компилировать файлы параллельно (без этого Visual Studio собирает их по одному)
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENTRA_COPY_AFTER_BUILD=OFF ${{ steps.version.outputs.cmake }}
           cmake --build build --config Release --parallel 4
