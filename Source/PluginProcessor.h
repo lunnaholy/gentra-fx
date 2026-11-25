@@ -49,6 +49,10 @@ public:
     enum Meter { input, output };
     float takePeak (Meter m, int channel) noexcept { return peaks[static_cast<size_t> (m * 2 + channel)].exchange (0.0f); }
 
+    // Позиция в четвертях на конец последнего блока (хост или своя, по темпу) и темп — для бегущей линии графиков.
+    double positionQuarters() const noexcept { return clockPpq.load (std::memory_order_relaxed); }
+    double tempo() const noexcept { return hostBpm.load (std::memory_order_relaxed); }
+
     // Насколько эффект машины давит громкость сейчас (0..1): сайдчейн — провал, гейт — закрытость. Для визуала.
     float effectLevel (int car) const noexcept;
 
@@ -133,6 +137,7 @@ private:
     void processTape (juce::AudioBuffer<float>&, int numChannels) noexcept;
     // Позиция в четвертях: с хоста, пока он играет, иначе бежит сама по последнему темпу.
     double ppqNow = 0.0;
+    std::atomic<double> clockPpq { 0.0 }; // ppqNow для интерфейса
     // Блоки JUCE готовятся на 2 канала и всегда получают стерео-копию (моно — дублируется): их ассерты требуют
     // ровно столько каналов, сколько при prepare.
     static constexpr int fxChunk = 32;

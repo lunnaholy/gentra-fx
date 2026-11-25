@@ -1191,6 +1191,30 @@ void logoPlate()
     CHECK (gentra->isAboutShown());
 }
 
+// Экран сайдчейна: кривая — та же громкость, что в звуке, бегущая линия — фаза шага по позиции DAW.
+void duckGraph()
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (48000.0, 480);
+    p.prepareToPlay (48000.0, 480);
+    DuckGraph graph (p);
+    CHECK (graph.gainAt (0.1) > 0.999f); // глубина 0 — ровная линия
+    setParam (p, "sidechainDepth", 100.0f);
+    CHECK (graph.gainAt (0.05) < 0.1f && std::abs (graph.gainAt (0.95) - 0.95f) < 0.01f); // Форма 50% — прямой возврат
+
+    FakeHead head;
+    head.info.setIsPlaying (true);
+    head.info.setBpm (120.0);
+    head.info.setPpqPosition (2.5); // середина четверти
+    p.setPlayHead (&head);
+    juce::AudioBuffer<float> buf (2, 480); // 10 мс = 0.02 четверти
+    juce::MidiBuffer midi;
+    buf.clear();
+    p.processBlock (buf, midi);
+    CHECK (std::abs (graph.phaseNow() - 0.52) < 1.0e-6);
+    p.setPlayHead (nullptr);
+}
+
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
 
 void beatSync()
@@ -1352,6 +1376,7 @@ int main (int argc, char** argv)
     garage();
     garagePanel();
     eqGraph();
+    duckGraph();
     ioGain();
     logoPlate();
     beatSync();

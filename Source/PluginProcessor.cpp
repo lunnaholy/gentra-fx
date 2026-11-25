@@ -445,6 +445,7 @@ void GentraAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     if (getSampleRate() > 0.0)
         ppqNow += numSamples * hostBpm.load (std::memory_order_relaxed) / 60.0 / getSampleRate();
+    clockPpq.store (ppqNow, std::memory_order_relaxed);
 }
 
 float GentraAudioProcessor::effectLevel (int car) const noexcept

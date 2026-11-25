@@ -530,6 +530,75 @@ void EqGraph::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelD
     set ("eqMidQ", value ("eqMidQ") * std::pow (1.5f, wheel.deltaY * (wheel.isReversed ? -1.0f : 1.0f) * 4.0f));
 }
 
+// ---------------- экран сайдчейна ----------------
+
+DuckGraph::DuckGraph (GentraAudioProcessor& p) : processor (p)
+{
+    setTitle (ru ("Кривая сайдчейна"));
+    startTimerHz (30);
+}
+
+double DuckGraph::phaseNow() const
+{
+    const int note = juce::jlimit (0, gentra::numDelayDivisions - 1, juce::roundToInt (value ("sidechainNote")));
+    const double steps = processor.positionQuarters() / gentra::delayDivisionBeats[static_cast<size_t> (note)];
+    return steps - std::floor (steps);
+}
+
+float DuckGraph::gainAt (double phase) const
+{
+    const double stepSeconds = gentra::delayDivisionSeconds (value ("sidechainNote"), processor.tempo());
+    const float amount = value ("sidechainOn") > 0.5f ? value ("sidechainDepth") * value ("sidechainMix") * 1.0e-4f : 0.0f;
+    return 1.0f - amount * static_cast<float> (gentra::sidechainDuck (phase, stepSeconds, value ("sidechainShape") * 0.01));
+}
+
+void DuckGraph::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat();
+    g.setColour (juce::Colour (0xff0d1013));
+    g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
+
+    const auto r = bounds.reduced (6.0f, 6.0f);
+    for (int i = 1; i < 4; ++i) // четверти шага
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawVerticalLine (juce::roundToInt (r.getX() + r.getWidth() * static_cast<float> (i) * 0.25f), r.getY(), r.getBottom());
+    }
+    g.setColour (juce::Colours::white.withAlpha (0.3f));
+    g.setFont (RoadView::font (10.0f));
+    g.drawText (processor.apvts.getParameter ("sidechainNote")->getCurrentValueAsText(), r.withHeight (11.0f).withTrimmedRight (2.0f),
+                juce::Justification::centredRight);
+    const auto plot = bounds.reduced (6.0f, 6.0f);
+    const auto yOf = [&] (float gain) { return plot.getBottom() - plot.getHeight() * gain; };
+
+    juce::Path line;
+    for (float x = plot.getX(); x <= plot.getRight() + 0.5f; x += 1.0f)
+    {
+        const float y = yOf (gainAt (static_cast<double> ((x - plot.getX()) / plot.getWidth())));
+        if (x <= plot.getX()) line.startNewSubPath (x, y);
+        else line.lineTo (x, y);
+    }
+    juce::Path fill (line);
+    fill.lineTo (plot.getRight(), plot.getBottom());
+    fill.lineTo (plot.getX(), plot.getBottom());
+    fill.closeSubPath();
+    const juce::Colour amber (0xffe8a23a);
+    g.setColour (amber.withAlpha (0.18f));
+    g.fillPath (fill);
+    g.setColour (amber);
+    g.strokePath (line, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Бегущая линия и точка на кривой.
+    const double phase = phaseNow();
+    const float x = plot.getX() + plot.getWidth() * static_cast<float> (phase), y = yOf (gainAt (phase));
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
+    g.drawVerticalLine (juce::roundToInt (x), plot.getY(), plot.getBottom());
+    g.setColour (juce::Colours::white);
+    g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+}
+
 // ---------------- гараж ----------------
 
 namespace
@@ -721,7 +790,7 @@ void GaragePanel::mouseUp (const juce::MouseEvent&)
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); },
                                                            [&p] (int car) { return p.effectLevel (car); }),
-      eqGraph (p.apvts), io (p), garage (p, road)
+      eqGraph (p.apvts), duckGraph (p), io (p), garage (p, road)
 {
     setLookAndFeel (&look);
     addAndMakeVisible (content);
@@ -771,6 +840,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
         popup.addAndMakeVisible (row.slider);
     }
     popup.addChildComponent (eqGraph);
+    popup.addChildComponent (duckGraph);
     content.addChildComponent (popup);
     content.addAndMakeVisible (io);
 
@@ -870,7 +940,7 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     const int free = garageOpen ? garageArea (true).getX() : RoadView::width;
     // Пропорции при двух строках — как у panel.png (760×213); винты в углах, поэтому поля по 34.
     // С графиком (белая) — шире: ползунки короче, график между ними и крестиком; влезает и при открытом гараже.
-    const int h = 58 + numRows * 24, w = popupGraph ? 580 : popupTrigger ? 490 : 380;
+    const int h = 58 + numRows * 24, w = popupGraph != nullptr ? 580 : popupTrigger ? 490 : 380;
     popup.setBounds ((free - w) / 2, RoadView::height - 8 - h, w, h);
     onButton.setBounds (34, 12, 151, 30);
     syncButton.setBounds (196, 13, 104, 28);
@@ -880,11 +950,13 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     {
         auto& row = rows[static_cast<size_t> (i)];
         const int y = 48 + i * 24;
-        row.label.setBounds (34, y, popupGraph ? 72 : 88, 22);
-        row.slider.setBounds (popupGraph ? 106 : 122, y, popupGraph ? 170 : 224, 22);
+        row.label.setBounds (34, y, popupGraph != nullptr ? 72 : 88, 22);
+        row.slider.setBounds (popupGraph != nullptr ? 106 : 122, y, popupGraph != nullptr ? 170 : 224, 22);
     }
     eqGraph.setBounds (288, 12, w - 288 - 12 - 36 - 34, h - 24);
-    eqGraph.setVisible (popupGraph);
+    eqGraph.setVisible (popupGraph == &eqGraph);
+    duckGraph.setBounds (eqGraph.getBounds());
+    duckGraph.setVisible (popupGraph == &duckGraph);
     rotate (popup, -0.6f);
 }
 
@@ -912,7 +984,8 @@ void GentraAudioProcessorEditor::showPopup (int car)
         return;
 
     const auto& carExtras = extras[static_cast<size_t> (car)];
-    popupGraph = car == gentra::car::white;
+    popupGraph = car == gentra::car::white ? static_cast<juce::Component*> (&eqGraph)
+               : car == gentra::car::purple ? static_cast<juce::Component*> (&duckGraph) : nullptr;
     popupTrigger = RoadView::working[static_cast<size_t> (car)].trigger != nullptr;
     placePopup (static_cast<int> (std::count_if (carExtras.begin(), carExtras.end(), [] (const Extra& e) { return e.id != nullptr; })));
 

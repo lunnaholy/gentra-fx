@@ -112,6 +112,22 @@ private:
     int dragging = -1, hovered = -1;
 };
 
+// Экран сайдчейна, как в Kickstart: громкость на один шаг ноты (провал и возврат по «Форме», с глубиной и Mix)
+// и бегущая линия — где сейчас фаза шага (по позиции DAW, без транспорта — по последнему темпу).
+class DuckGraph final : public juce::Component, private juce::Timer
+{
+public:
+    explicit DuckGraph (GentraAudioProcessor&);
+    void paint (juce::Graphics&) override;
+    double phaseNow() const; // фаза шага 0..1 для бегущей линии
+    float gainAt (double phase) const; // громкость на кривой 0..1
+
+private:
+    void timerCallback() override { if (isShowing()) repaint(); }
+    float value (const char* id) const { return processor.apvts.getRawParameterValue (id)->load(); }
+    GentraAudioProcessor& processor;
+};
+
 // Гараж: все машины списком. Сверху вниз — порядок цепочки эффектов, меняется перетаскиванием;
 // тумблер справа — едет машина по дороге или стоит в гараже; клик по строке открывает машину на дороге.
 class GaragePanel final : public juce::Component
@@ -183,7 +199,7 @@ private:
     void placePopup (int numRows);
     static juce::Rectangle<int> garageArea (bool open);
     int popupRows = 3;
-    bool popupGraph = false;   // табличка белой машины — шире, с графиком
+    juce::Component* popupGraph = nullptr; // экран в табличке (эквалайзер, сайдчейн) — табличка шире
     bool popupTrigger = false; // у машины есть педаль — табличка шире на кнопку
 
     GentraAudioProcessor& gentraProcessor;
@@ -200,6 +216,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment, triggerAttachment;
     std::array<Row, 3> rows; // до трёх доп. параметров; табличка — под их число
     EqGraph eqGraph;
+    DuckGraph duckGraph;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 
     IoPanel io;
