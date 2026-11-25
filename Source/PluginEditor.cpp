@@ -593,7 +593,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     // Масштаб окна, как у FabFilter: тянется за угол с сохранением пропорций; размер один на все проекты —
     // в настройках пользователя, не в пресете. Читаем до setResizable: тот уже зовёт resized() и перезаписал бы его.
     const double scale = juce::jlimit (minScale, maxScale, settings.getDoubleValue (uiScaleKey, 1.0));
-    const double w = RoadView::width, h = RoadView::height;
+    const double w = RoadView::width * baseScale, h = RoadView::height * baseScale;
     setResizable (true, true);
     setResizeLimits (juce::roundToInt (w * minScale), juce::roundToInt (h * minScale),
                      juce::roundToInt (w * maxScale), juce::roundToInt (h * maxScale));
@@ -610,7 +610,7 @@ void GentraAudioProcessorEditor::resized()
 {
     const float scale = static_cast<float> (getWidth()) / static_cast<float> (RoadView::width);
     content.setTransform (juce::AffineTransform::scale (scale));
-    settings.setValue (uiScaleKey, scale);
+    settings.setValue (uiScaleKey, scale / baseScale);
 }
 
 juce::File GentraAudioProcessorEditor::settingsFile = [] {

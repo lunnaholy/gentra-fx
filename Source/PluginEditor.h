@@ -106,6 +106,9 @@ public:
 
     void resized() override;
 
+    // Окно на 100% — сцена RoadView::width × height, увеличенная во столько раз (масштаб пользователя — поверх).
+    static constexpr double baseScale = 1.2;
+
     // Для теста: прокрутить анимацию и открыть машину без окна.
     void advance (float dt) { road.advance (dt); }
     void select (int car) { road.select (car); }

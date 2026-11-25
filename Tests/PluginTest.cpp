@@ -1089,7 +1089,8 @@ void uiScale()
     GentraAudioProcessor p, other;
     {
         std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
-        CHECK (editor->getWidth() == RoadView::width && editor->isResizable());
+        // 100% — сцена в 1.2 раза крупнее.
+        CHECK (editor->getWidth() == juce::roundToInt (RoadView::width * GentraAudioProcessorEditor::baseScale) && editor->isResizable());
         editor->setSize (RoadView::width * 3 / 2, RoadView::height * 3 / 2);
     }
     CHECK (! p.apvts.state.hasProperty ("uiScale"));
@@ -1154,7 +1155,8 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     for (int i = 0; i < frames; ++i)
         gentra->advance (1.0f / 60.0f);
 
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f / static_cast<float> (scale));
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true,
+                                                     static_cast<float> (2.0 / (scale * GentraAudioProcessorEditor::baseScale)));
     const juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (path));
     file.deleteFile();
     juce::FileOutputStream out (file);
