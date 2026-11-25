@@ -121,6 +121,10 @@ private:
     std::atomic<float>* delayNote; // индекс в gentra::delayDivisionNames
     std::atomic<double> hostBpm { 120.0 }; // последний темп хоста; без хоста — 120
     gentra::Equalizer eq;
+    // Частоты полос эквалайзера и Q середины: в Stage места нет (все четыре слота — усиления), сглаживаются здесь.
+    static constexpr std::array<const char*, 4> eqShapeIds { "eqLowFreq", "eqMidFreq", "eqHighFreq", "eqMidQ" };
+    std::array<std::atomic<float>*, 4> eqShapeRaw {};
+    std::array<juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative>, 4> eqShape;
     gentra::Delay delay;
     gentra::BassBoost bass;
     gentra::LoRes lores;

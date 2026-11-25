@@ -309,6 +309,14 @@ void equalizer (double sampleRate)
     const double midBoost = gainAt (1000.0), midLeavesBottom = gainAt (50.0), midLeavesTop = gainAt (15000.0);
     std::printf ("eq %.0f Hz: mid +12 -> 1 kHz %+.1f dB, 50 Hz %+.1f dB, 15 kHz %+.1f dB\n", sampleRate, midBoost, midLeavesBottom, midLeavesTop);
     CHECK (midBoost > 11.5 && std::abs (midLeavesBottom) < 0.5 && std::abs (midLeavesTop) < 0.5);
+    // Частота и ширина середины подвижны: узкий колокол на 3 кГц поднимает 3 кГц и почти не трогает 1 кГц.
+    setParam (p, "eqMidFreq", 3000.0f);
+    setParam (p, "eqMidQ", 4.0f);
+    const double movedPeak = gainAt (3000.0), movedAway = gainAt (1000.0);
+    std::printf ("eq %.0f Hz: mid +12 at 3 kHz Q4 -> 3 kHz %+.1f dB, 1 kHz %+.1f dB\n", sampleRate, movedPeak, movedAway);
+    CHECK (movedPeak > 11.5 && movedAway < 1.5);
+    setParam (p, "eqMidFreq", 1000.0f);
+    setParam (p, "eqMidQ", 0.7f);
     setParam (p, "eqMid", 0.0f);
     std::printf ("eq %.0f Hz: low +12 -> 50 Hz %+.1f dB, 10 kHz %+.1f dB; high +12 -> 10 kHz %+.1f dB, 50 Hz %+.1f dB; low -12 -> %+.1f dB\n",
                  sampleRate, lowBoost, lowLeavesTop, highBoost, highLeavesBottom, lowCut);
@@ -896,6 +904,37 @@ void garagePanel()
     CHECK (road.getSelected() == gentra::car::black);
 }
 
+// График эквалайзера: точка середины тянется в частоту и усиление, колесо меняет ширину, двойной клик — в ноль.
+void eqGraph()
+{
+    GentraAudioProcessor p;
+    EqGraph graph (p.apvts);
+    graph.setSize (220, 106);
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto event = [&] (juce::Point<float> at, juce::Point<float> down, bool dragged, int clicks = 1)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, &graph, &graph, now, down, now, clicks, dragged);
+    };
+    const auto value = [&] (const char* id) { return p.apvts.getRawParameterValue (id)->load(); };
+
+    const auto mid = graph.handle (1);
+    CHECK (std::abs (mid.y - graph.handle (0).y) < 0.01f); // всё в нуле — точки на одной линии
+    const juce::Point<float> to { mid.x + 40.0f, mid.y - 20.0f }; // правее и выше
+    graph.mouseDown (event (mid, mid, false));
+    graph.mouseDrag (event (to, mid, true));
+    graph.mouseUp (event (to, mid, true));
+    std::printf ("eq graph: mid dragged to %.0f Hz, %+.1f dB\n", value ("eqMidFreq"), value ("eqMid"));
+    CHECK (value ("eqMidFreq") > 1500.0f && value ("eqMid") > 3.0f);
+    CHECK (graph.handle (1).getDistanceFrom (to) < 2.0f); // точка там, куда отпустили
+
+    const float q = value ("eqMidQ");
+    graph.mouseWheelMove (event (to, to, false), juce::MouseWheelDetails { 0.0f, 0.25f, false, false, false });
+    CHECK (value ("eqMidQ") > q);
+    graph.mouseDoubleClick (event (to, to, false, 2));
+    CHECK (std::abs (value ("eqMid")) < 0.01f);
+}
+
 // Тряска под бит DAW: процессор правильно считает долю из позиции хоста, интерфейс бьёт на долях.
 
 void beatSync()
@@ -1045,6 +1084,7 @@ int main (int argc, char** argv)
     uiScale();
     garage();
     garagePanel();
+    eqGraph();
     beatSync();
 
     std::printf ("OK\n");

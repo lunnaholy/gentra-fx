@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 // DSP без зависимости от JUCE. Все amount — в диапазоне 0..1.
@@ -22,10 +23,6 @@ constexpr double driveMaxDb    = 36.0;    // предусиление дисто
 constexpr double driveRefLevel = 0.25;    // синус этой амплитуды выходит с тем же пиком при любом драйве
 constexpr double toneDarkHz    = 800.0;   // срез тона при 0%
 constexpr double toneBrightHz  = 16000.0; // срез тона при 100% (дисторшн и дилей)
-constexpr double eqLowHz       = 200.0;   // шельф «Низ» эквалайзера
-constexpr double eqMidHz       = 1000.0;  // колокол «Середина» эквалайзера
-constexpr double eqMidQ        = 0.7;     // широкий: середина плавно стыкуется с шельфами
-constexpr double eqHighHz      = 4000.0;  // шельф «Верх» эквалайзера
 constexpr double delayMaxSeconds = 4.0;   // длина линии дилея: 1/2 при 30 BPM
 constexpr double delayGlideTau = 0.05;    // постоянная плавной смены времени дилея, с (заметная езда ~0.2 с)
 constexpr double reverbPreDelayMaxSeconds = 0.05; // пре-дилей реверба при размере 100%
@@ -115,6 +112,13 @@ struct Biquad
         z1[ch] = b1 * in - a1 * out + z2[ch];
         z2[ch] = b2 * in - a2 * out;
         return out;
+    }
+
+    // Усиление на частоте freq, дБ — для графика.
+    double gainDb (double fs, double freq) const noexcept
+    {
+        const auto e1 = std::polar (1.0, -2.0 * pi * freq / fs), e2 = e1 * e1; // z^-1, z^-2 на единичной окружности
+        return 20.0 * std::log10 (std::abs ((b0 + b1 * e1 + b2 * e2) / (1.0 + a1 * e1 + a2 * e2)));
     }
 
     void setLowShelf (double fs, double freq, double q, double gainDb) noexcept
@@ -347,7 +351,19 @@ inline double toneHz (float toneAmount) noexcept
     return toneDarkHz * std::pow (toneBrightHz / toneDarkHz, static_cast<double> (toneAmount));
 }
 
-// Белая машина: шельф «Низ», колокол «Середина», шельф «Верх», затем громкость. Все параметры — в дБ.
+// Белая машина: шельф «Низ», колокол «Середина», шельф «Верх», затем громкость.
+struct EqSettings
+{
+    float volumeDb = 0.0f, lowDb = 0.0f, midDb = 0.0f, highDb = 0.0f; // усиления, дБ
+    float lowHz = 200.0f, midHz = 1000.0f, highHz = 4000.0f, midQ = 0.7f;
+
+    bool bandsDiffer (const EqSettings& o) const noexcept
+    {
+        return changed (lowDb, o.lowDb) || changed (midDb, o.midDb) || changed (highDb, o.highDb) || changed (lowHz, o.lowHz)
+               || changed (midHz, o.midHz) || changed (highHz, o.highHz) || changed (midQ, o.midQ);
+    }
+};
+
 class Equalizer
 {
 public:
@@ -362,30 +378,29 @@ public:
         low.reset();
         mid.reset();
         high.reset();
-        last = { 1.0e9f, 1.0e9f, 1.0e9f, 1.0e9f };
+        last.lowHz = -1.0f; // заведомо «изменилось»
+        gainDb = 1.0e9f;
         countdown = 0;
     }
 
     // Раз в сэмпл-фрейм; полосы пересчитываются не чаще раза в 16 сэмплов, громкость — сразу.
-    void setParams (float volumeDb, float lowDb, float midDb, float highDb) noexcept
+    void setParams (const EqSettings& s) noexcept
     {
-        if (changed (volumeDb, last[0]))
+        if (changed (s.volumeDb, gainDb))
         {
-            last[0] = volumeDb;
-            gain = static_cast<float> (std::pow (10.0, static_cast<double> (volumeDb) / 20.0));
+            gainDb = s.volumeDb;
+            gain = static_cast<float> (std::pow (10.0, static_cast<double> (s.volumeDb) / 20.0));
         }
 
         if (countdown > 0)
             --countdown;
 
-        if (countdown == 0 && (changed (lowDb, last[1]) || changed (midDb, last[2]) || changed (highDb, last[3])))
+        if (countdown == 0 && s.bandsDiffer (last))
         {
-            last[1] = lowDb;
-            last[2] = midDb;
-            last[3] = highDb;
-            low.setLowShelf (fs, eqLowHz, 0.707, lowDb);
-            mid.setPeak (fs, eqMidHz, eqMidQ, midDb);
-            high.setHighShelf (fs, eqHighHz, 0.707, highDb);
+            last = s;
+            low.setLowShelf (fs, s.lowHz, 0.707, s.lowDb);
+            mid.setPeak (fs, s.midHz, s.midQ, s.midDb);
+            high.setHighShelf (fs, s.highHz, 0.707, s.highDb);
             countdown = 16;
         }
     }
@@ -395,11 +410,17 @@ public:
         return gain * static_cast<float> (high.process (channel, mid.process (channel, low.process (channel, x))));
     }
 
+    // Итоговое усиление на частоте freq, дБ — для графика (по последним setParams).
+    double gainDbAt (double freq) const noexcept
+    {
+        return static_cast<double> (gainDb) + low.gainDb (fs, freq) + mid.gainDb (fs, freq) + high.gainDb (fs, freq);
+    }
+
 private:
     double fs = 44100.0;
     Biquad low, mid, high;
-    float gain = 1.0f;
-    std::array<float, 4> last {};
+    float gain = 1.0f, gainDb = 1.0e9f;
+    EqSettings last;
     int countdown = 0;
 };
 

@@ -28,6 +28,42 @@ struct Box final : juce::Component
     juce::Image image = RoadView::image ("panel_png");
 };
 
+// График белой машины: примерная АЧХ полос и громкости. Точки полос тянутся мышью, как в эквалайзере микшера FL:
+// по горизонтали частота, по вертикали усиление; колесо над «Серединой» — ширина (Q), двойной клик — усиление в ноль.
+class EqGraph final : public juce::Component, private juce::Timer
+{
+public:
+    explicit EqGraph (juce::AudioProcessorValueTreeState&);
+
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+    juce::Point<float> handle (int band) const; // где точка полосы: 0 низ, 1 середина, 2 верх
+
+private:
+    void timerCallback() override; // перерисовать, если параметры поменялись (в т.ч. из хоста)
+    int bandAt (juce::Point<float>) const;
+    juce::Rectangle<float> plot() const;
+    float xOf (double hz) const;
+    double hzAt (float x) const;
+    float yOf (double db) const;
+    double dbAt (float y) const;
+    float value (const char* id) const;
+    void set (const char* id, float v);
+    gentra::EqSettings current() const;
+
+    juce::AudioProcessorValueTreeState& apvts;
+    gentra::EqSettings shown;
+    gentra::Equalizer curve; // те же фильтры, что в звуке, — только для расчёта АЧХ
+    int dragging = -1, hovered = -1;
+};
+
 // Гараж: все машины списком. Сверху вниз — порядок цепочки эффектов, меняется перетаскиванием;
 // тумблер справа — едет машина по дороге или стоит в гараже; клик по строке открывает машину на дороге.
 class GaragePanel final : public juce::Component
@@ -74,6 +110,7 @@ public:
     void advance (float dt) { road.advance (dt); }
     void select (int car) { road.select (car); }
     void openGarage() { showGarage (true, false); }
+    EqGraph& getEqGraph() { return eqGraph; }
 
     // Общие настройки пользователя (масштаб окна); тест подменяет файл, чтобы не трогать настоящий.
     static juce::File settingsFile;
@@ -93,6 +130,7 @@ private:
     void placePopup (int numRows);
     static juce::Rectangle<int> garageArea (bool open);
     int popupRows = 3;
+    bool popupGraph = false; // табличка белой машины — шире, с графиком
 
     GentraAudioProcessor& gentraProcessor;
     juce::PropertiesFile settings { settingsFile, settingsOptions() };
@@ -107,6 +145,7 @@ private:
     juce::TextButton syncButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
     std::array<Row, 3> rows; // до трёх доп. параметров; табличка — под их число
+    EqGraph eqGraph;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
 
     // Гараж: какие машины на дороге.

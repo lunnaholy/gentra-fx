@@ -80,6 +80,8 @@ GentraAudioProcessor::GentraAudioProcessor()
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
+    for (size_t i = 0; i < eqShapeIds.size(); ++i)
+        eqShapeRaw[i] = apvts.getRawParameterValue (eqShapeIds[i]);
     storeChain (getCarOrder());
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
@@ -131,7 +133,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         notes.add (name);
 
     // Версия 1 — параметры первого релиза, версия 2 — добавленные вместе с «дорожным» интерфейсом,
-    // 3 — красная, белая и серебряная машины, 4 — синяя, розовая и серая.
+    // 3 — красная, белая и серебряная машины, 4 — синяя, розовая, серая, фиолетовая и жёлтая,
+    // 5 — частоты эквалайзера, зелёная и оранжевая.
+    const auto skewed = [] (float lo, float hi, float centre, float step)
+    {
+        juce::NormalisableRange<float> r (lo, hi, step);
+        r.setSkewForCentre (centre);
+        return r;
+    };
     juce::AudioProcessorValueTreeState::ParameterLayout layout {
         std::make_unique<Float> (juce::ParameterID { "bass", 1 }, "Bass Boost", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "bassFreq", 2 }, "Bass Freq",
@@ -197,7 +206,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "gateNote", 4 }, "Gate Note", notes, gentra::defaultGateDivision),
         std::make_unique<Float> (juce::ParameterID { "gateSmooth", 4 }, "Gate Smooth", percent, 20.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "gateMix", 4 }, "Gate Mix", percent, 100.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "gateOn", 4 }, "Gate On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "gateOn", 4 }, "Gate On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "eqLowFreq", 5 }, "EQ Low Freq", skewed (30.0f, 1000.0f, 150.0f, 1.0f), 200.0f, hz),
+        std::make_unique<Float> (juce::ParameterID { "eqMidFreq", 5 }, "EQ Mid Freq", skewed (150.0f, 8000.0f, 1000.0f, 1.0f), 1000.0f, hz),
+        std::make_unique<Float> (juce::ParameterID { "eqHighFreq", 5 }, "EQ High Freq", skewed (1000.0f, 18000.0f, 4000.0f, 1.0f), 4000.0f, hz),
+        std::make_unique<Float> (juce::ParameterID { "eqMidQ", 5 }, "EQ Mid Q", skewed (0.3f, 6.0f, 1.0f, 0.01f), 0.7f)
     };
     return layout;
 }
@@ -218,6 +232,11 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     white.prepare (sampleRate);
     silver.prepare (sampleRate);
     eq.prepare (sampleRate);
+    for (size_t i = 0; i < eqShape.size(); ++i)
+    {
+        eqShape[i].reset (sampleRate, smoothingSeconds);
+        eqShape[i].setCurrentAndTargetValue (eqShapeRaw[i]->load());
+    }
     delay.prepare (sampleRate);
     const juce::dsp::ProcessSpec spec { sampleRate, static_cast<juce::uint32> (fxChunk), static_cast<juce::uint32> (gentra::maxChannels) };
     blue.prepare (sampleRate);
@@ -245,6 +264,8 @@ void GentraAudioProcessor::reset()
     drive.reset();
     driveEngaged.setCurrentAndTargetValue (0.0f);
     eq.reset();
+    for (size_t i = 0; i < eqShape.size(); ++i)
+        eqShape[i].setCurrentAndTargetValue (eqShapeRaw[i]->load());
     delay.reset();
     chorus.reset();
     phaser.reset();
@@ -598,21 +619,30 @@ void GentraAudioProcessor::processDrive (juce::AudioBuffer<float>& buffer, int n
 void GentraAudioProcessor::processEq (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
 {
     white.updateTargets();
+    for (size_t i = 0; i < eqShape.size(); ++i)
+        eqShape[i].setTargetValue (eqShapeRaw[i]->load());
     if (! white.active())
     {
         eq.reset();
         white.skip (buffer.getNumSamples());
+        for (auto& v : eqShape)
+            v.skip (buffer.getNumSamples());
         return;
     }
     auto* const* data = buffer.getArrayOfWritePointers();
     for (int n = 0; n < buffer.getNumSamples(); ++n)
     {
-        const float volume = white.next (Stage::main);
-        const float low = white.next (Stage::extraA);
-        const float high = white.next (Stage::extraB);
-        const float mid = white.next (Stage::extraC);
+        gentra::EqSettings s;
+        s.volumeDb = white.next (Stage::main);
+        s.lowDb = white.next (Stage::extraA);
+        s.highDb = white.next (Stage::extraB);
+        s.midDb = white.next (Stage::extraC);
+        s.lowHz = eqShape[0].getNextValue();
+        s.midHz = eqShape[1].getNextValue();
+        s.highHz = eqShape[2].getNextValue();
+        s.midQ = eqShape[3].getNextValue();
         const float wet = white.next (Stage::wet);
-        eq.setParams (volume, low, mid, high);
+        eq.setParams (s);
 
         for (int ch = 0; ch < numChannels; ++ch)
         {

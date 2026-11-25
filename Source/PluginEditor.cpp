@@ -124,6 +124,225 @@ void Box::paint (juce::Graphics& g)
     drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
 }
 
+// ---------------- график эквалайзера ----------------
+
+namespace
+{
+struct Band
+{
+    const char* freq;
+    const char* gain;
+};
+constexpr std::array<Band, 3> eqBands { { { "eqLowFreq", "eqLow" }, { "eqMidFreq", "eqMid" }, { "eqHighFreq", "eqHigh" } } };
+constexpr double graphLoHz = 20.0, graphHiHz = 20000.0, graphDb = 15.0;
+constexpr double graphFs = 96000.0; // АЧХ считается на высокой частоте: у 20 кГц кривая не загибается к Найквисту
+constexpr float handleRadius = 5.0f, grabRadius = 11.0f;
+}
+
+EqGraph::EqGraph (juce::AudioProcessorValueTreeState& state) : apvts (state)
+{
+    curve.prepare (graphFs);
+    shown = current();
+    setTitle (ru ("График эквалайзера"));
+    startTimerHz (30);
+}
+
+float EqGraph::value (const char* id) const { return apvts.getRawParameterValue (id)->load(); }
+
+gentra::EqSettings EqGraph::current() const
+{
+    gentra::EqSettings s;
+    s.volumeDb = value ("eqVolume");
+    s.lowDb = value ("eqLow");
+    s.midDb = value ("eqMid");
+    s.highDb = value ("eqHigh");
+    s.lowHz = value ("eqLowFreq");
+    s.midHz = value ("eqMidFreq");
+    s.highHz = value ("eqHighFreq");
+    s.midQ = value ("eqMidQ");
+    return s;
+}
+
+void EqGraph::set (const char* id, float v)
+{
+    auto* p = apvts.getParameter (id);
+    const auto& range = p->getNormalisableRange();
+    p->setValueNotifyingHost (range.convertTo0to1 (range.snapToLegalValue (juce::jlimit (range.start, range.end, v))));
+}
+
+void EqGraph::timerCallback()
+{
+    const auto now = current();
+    if (isShowing() && (now.bandsDiffer (shown) || gentra::changed (now.volumeDb, shown.volumeDb)))
+    {
+        shown = now;
+        repaint();
+    }
+}
+
+juce::Rectangle<float> EqGraph::plot() const { return getLocalBounds().toFloat().reduced (6.0f, 5.0f); }
+
+float EqGraph::xOf (double hz) const
+{
+    const auto r = plot();
+    return r.getX() + r.getWidth() * static_cast<float> (std::log (hz / graphLoHz) / std::log (graphHiHz / graphLoHz));
+}
+
+double EqGraph::hzAt (float x) const
+{
+    const auto r = plot();
+    return graphLoHz * std::pow (graphHiHz / graphLoHz, static_cast<double> ((x - r.getX()) / r.getWidth()));
+}
+
+float EqGraph::yOf (double db) const
+{
+    const auto r = plot();
+    return r.getCentreY() - r.getHeight() * 0.5f * static_cast<float> (db / graphDb);
+}
+
+double EqGraph::dbAt (float y) const
+{
+    const auto r = plot();
+    return static_cast<double> ((r.getCentreY() - y) / (r.getHeight() * 0.5f)) * graphDb;
+}
+
+juce::Point<float> EqGraph::handle (int band) const
+{
+    // Кривая включает громкость — точки едут вместе с ней.
+    const auto& b = eqBands[static_cast<size_t> (band)];
+    return { xOf (value (b.freq)), yOf (value (b.gain) + value ("eqVolume")) };
+}
+
+int EqGraph::bandAt (juce::Point<float> at) const
+{
+    int best = -1;
+    float bestDistance = grabRadius;
+    for (int band = 0; band < 3; ++band)
+        if (const float d = handle (band).getDistanceFrom (at); d < bestDistance)
+        {
+            best = band;
+            bestDistance = d;
+        }
+    return best;
+}
+
+void EqGraph::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat();
+    // Экран магнитолы: тёмное стекло в рамке.
+    g.setColour (juce::Colour (0xff0d1013));
+    g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
+
+    const auto r = plot();
+    g.setFont (RoadView::font (10.0f));
+    for (double hz : { 100.0, 1000.0, 10000.0 })
+    {
+        const float x = xOf (hz);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawVerticalLine (juce::roundToInt (x), r.getY(), r.getBottom());
+        g.setColour (juce::Colours::white.withAlpha (0.3f));
+        g.drawText (hz < 1000.0 ? "100" : hz < 10000.0 ? "1k" : "10k", juce::Rectangle<float> (x + 2.0f, r.getBottom() - 11.0f, 24.0f, 11.0f),
+                    juce::Justification::centredLeft);
+    }
+    g.setColour (juce::Colours::white.withAlpha (0.16f));
+    g.drawHorizontalLine (juce::roundToInt (yOf (0.0)), r.getX(), r.getRight());
+
+    // Кривая: те же биквады, что в звуке.
+    curve.reset();
+    curve.setParams (shown);
+    juce::Path line;
+    for (float x = r.getX(); x <= r.getRight() + 0.5f; x += 1.5f)
+    {
+        const float y = juce::jlimit (r.getY(), r.getBottom(), yOf (curve.gainDbAt (hzAt (x))));
+        if (x <= r.getX()) line.startNewSubPath (x, y);
+        else line.lineTo (x, y);
+    }
+    juce::Path fill (line);
+    fill.lineTo (r.getRight(), yOf (0.0));
+    fill.lineTo (r.getX(), yOf (0.0));
+    fill.closeSubPath();
+    const juce::Colour amber (0xffe8a23a);
+    g.setColour (amber.withAlpha (0.18f));
+    g.fillPath (fill);
+    g.setColour (amber);
+    g.strokePath (line, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    for (int band = 0; band < 3; ++band)
+    {
+        const auto p = handle (band);
+        const bool active = band == dragging || band == hovered;
+        g.setColour (active ? juce::Colours::white : amber);
+        g.fillEllipse (p.x - handleRadius, p.y - handleRadius, 2.0f * handleRadius, 2.0f * handleRadius);
+        g.setColour (juce::Colour (0xff0d1013));
+        g.setFont (RoadView::font (10.0f));
+        g.drawText (juce::String (band + 1), juce::Rectangle<float> (p.x - handleRadius, p.y - handleRadius, 2.0f * handleRadius, 2.0f * handleRadius),
+                    juce::Justification::centred);
+    }
+}
+
+void EqGraph::mouseMove (const juce::MouseEvent& e)
+{
+    const int band = bandAt (e.position);
+    if (band != hovered)
+    {
+        hovered = band;
+        setMouseCursor (band >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void EqGraph::mouseExit (const juce::MouseEvent&)
+{
+    hovered = -1;
+    repaint();
+}
+
+void EqGraph::mouseDown (const juce::MouseEvent& e)
+{
+    dragging = bandAt (e.position);
+    if (dragging < 0)
+        return;
+    const auto& b = eqBands[static_cast<size_t> (dragging)];
+    apvts.getParameter (b.freq)->beginChangeGesture();
+    apvts.getParameter (b.gain)->beginChangeGesture();
+}
+
+void EqGraph::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragging < 0)
+        return;
+    const auto& b = eqBands[static_cast<size_t> (dragging)];
+    set (b.freq, static_cast<float> (hzAt (e.position.x)));
+    set (b.gain, static_cast<float> (dbAt (e.position.y)) - value ("eqVolume"));
+    timerCallback(); // точка едет за мышью без ожидания таймера
+}
+
+void EqGraph::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging < 0)
+        return;
+    const auto& b = eqBands[static_cast<size_t> (dragging)];
+    apvts.getParameter (b.freq)->endChangeGesture();
+    apvts.getParameter (b.gain)->endChangeGesture();
+    dragging = -1;
+    repaint();
+}
+
+void EqGraph::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (const int band = bandAt (e.position); band >= 0)
+        set (eqBands[static_cast<size_t> (band)].gain, 0.0f);
+}
+
+void EqGraph::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    if (bandAt (e.position) != 1) // ширина есть только у колокола
+        return;
+    set ("eqMidQ", value ("eqMidQ") * std::pow (1.5f, wheel.deltaY * (wheel.isReversed ? -1.0f : 1.0f) * 4.0f));
+}
+
 // ---------------- гараж ----------------
 
 namespace
@@ -315,7 +534,7 @@ void GaragePanel::mouseUp (const juce::MouseEvent&)
 GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     : AudioProcessorEditor (&p), gentraProcessor (p), road (p.apvts, [&p] { return p.takeBassLevel(); }, [&p] (double& beat, double& bpm) { return p.beatNow (beat, bpm); },
                                                            [&p] (int car) { return p.effectLevel (car); }),
-      garage (p, road)
+      eqGraph (p.apvts), garage (p, road)
 {
     setLookAndFeel (&look);
     addAndMakeVisible (content);
@@ -354,6 +573,7 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
         popup.addAndMakeVisible (row.label);
         popup.addAndMakeVisible (row.slider);
     }
+    popup.addChildComponent (eqGraph);
     content.addChildComponent (popup);
 
     // Гараж: кнопка в углу выдвигает панель справа; закрытая панель ждёт за правым краем.
@@ -434,18 +654,21 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     // По центру открытой части дороги (гараж справа её сужает).
     const int free = garageOpen ? garageArea (true).getX() : RoadView::width;
     // Пропорции при двух строках — как у panel.png (760×213); винты в углах, поэтому поля по 34.
-    const int h = 58 + numRows * 24;
-    popup.setBounds ((free - 380) / 2, RoadView::height - 8 - h, 380, h);
+    // С графиком (белая) — шире: ползунки короче, график между ними и крестиком; влезает и при открытом гараже.
+    const int h = 58 + numRows * 24, w = popupGraph ? 580 : 380;
+    popup.setBounds ((free - w) / 2, RoadView::height - 8 - h, w, h);
     onButton.setBounds (34, 12, 151, 30);
     syncButton.setBounds (196, 13, 104, 28);
-    closeButton.setBounds (380 - 34 - 36, 12, 36, 30);
+    closeButton.setBounds (w - 34 - 36, 12, 36, 30);
     for (int i = 0; i < static_cast<int> (rows.size()); ++i)
     {
         auto& row = rows[static_cast<size_t> (i)];
         const int y = 48 + i * 24;
-        row.label.setBounds (34, y, 88, 22);
-        row.slider.setBounds (122, y, 224, 22);
+        row.label.setBounds (34, y, popupGraph ? 72 : 88, 22);
+        row.slider.setBounds (popupGraph ? 106 : 122, y, popupGraph ? 170 : 224, 22);
     }
+    eqGraph.setBounds (288, 12, w - 288 - 12 - 36 - 34, h - 24);
+    eqGraph.setVisible (popupGraph);
     rotate (popup, -0.6f);
 }
 
@@ -472,6 +695,7 @@ void GentraAudioProcessorEditor::showPopup (int car)
         return;
 
     const auto& carExtras = extras[static_cast<size_t> (car)];
+    popupGraph = car == gentra::car::white;
     placePopup (static_cast<int> (std::count_if (carExtras.begin(), carExtras.end(), [] (const Extra& e) { return e.id != nullptr; })));
 
     auto& apvts = gentraProcessor.apvts;
