@@ -111,7 +111,14 @@ private:
     Stage black, rust, red, white, silver, blue, pink, grey, purple, yellow, green, orange;
     std::atomic<float>* sidechainNote; // индекс в gentra::delayDivisionNames
     std::atomic<float>* gateNote;
-    std::atomic<float>* tapeCycle; // индекс в gentra::tapeCycleNames
+    // Тормоз ленты: педаль, времена (мс или ноты из gentra::tapeNoteNames), кривая.
+    std::atomic<float>* tapeBrake;
+    std::atomic<float>* tapeStopMs;
+    std::atomic<float>* tapeStartMs;
+    std::atomic<float>* tapeCurvePct;
+    std::atomic<float>* tapeSync;
+    std::atomic<float>* tapeStopNote;
+    std::atomic<float>* tapeStartNote;
     std::atomic<float>* panNote;
     std::atomic<float>* panShape; // индекс в gentra::panShapeNames
     std::atomic<float> duckLevel { 0.0f }, gateLevel { 0.0f }, tapeLevel { 0.0f }, panLevel { 0.0f };
@@ -121,6 +128,8 @@ private:
     juce::Random panRng;
     void processPan (juce::AudioBuffer<float>&, int numChannels) noexcept;
     gentra::TapeStop tape;
+    enum class TapeState { playing, stopping, stopped, starting } tapeState = TapeState::playing;
+    double tapeProgress = 0.0, tapeSpeed = 1.0; // ход торможения или разгона 0..1, скорость ленты 0..1
     void processTape (juce::AudioBuffer<float>&, int numChannels) noexcept;
     // Позиция в четвертях: с хоста, пока он играет, иначе бежит сама по последнему темпу.
     double ppqNow = 0.0;

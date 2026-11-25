@@ -627,26 +627,39 @@ void compCar (double sampleRate)
     CHECK (loud > 0.1f && loud < 0.5f);                  // автоподъём: не утонуло и не выросло
 }
 
-// Зелёная: раз в цикл лента тормозит (высота падает, у остановки тишина) и разгоняется, затем звук снова
-// ровно как вход; переходы без щелчков.
+// Зелёная, как Kilohearts Tape Stop: педаль отпущена — звук ровно как вход; нажали — лента тормозит за «Тормоз»
+// (высота падает) и стоит (тишина); отпустили — разгоняется за «Разгон» и снова ровно вход. «По такту» — времена нотами.
+// Педаль посреди торможения или разгона и все переходы — без щелчков.
 void tapeCar (double sampleRate)
 {
     GentraAudioProcessor p;
-    p.setRateAndBufferSizeDetails (sampleRate, 512);
-    p.prepareToPlay (sampleRate, 512);
+    p.setRateAndBufferSizeDetails (sampleRate, 64);
+    p.prepareToPlay (sampleRate, 64);
     FakeHead head;
-    head.info.setIsPlaying (true);
-    head.info.setBpm (120.0);
+    head.info.setBpm (120.0); // транспорт стоит, темп известен
     p.setPlayHead (&head);
-    CHECK (p.apvts.getParameter ("tapeEvery")->getCurrentValueAsText() == juce::String::fromUTF8 ("1 такт"));
-    setParam (p, "tapeEvery", 0.0f); // 1/2 — цикл 1 с при 120 BPM: тормоз 0.5…1 с, разгон 0…0.15 с
-    setParam (p, "tapeAmount", 100.0f);
+    setParam (p, "tapeStopTime", 400.0f);
+    setParam (p, "tapeStartTime", 200.0f);
     p.reset();
 
     const double freq = 1000.0;
-    const auto y = stepRun (p, head, sampleRate, 2.0, freq);
-    const auto index = [&] (double seconds) { return static_cast<size_t> (seconds * sampleRate); };
     const auto input = [&] (size_t n) { return 0.5f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * freq * static_cast<double> (n) / sampleRate)); };
+    std::vector<float> y;
+    juce::MidiBuffer midi;
+    const auto run = [&] (double seconds) // синус блоками по 64, как в DAW
+    {
+        juce::AudioBuffer<float> buf (2, 64);
+        for (const auto until = y.size() + static_cast<size_t> (seconds * sampleRate); y.size() < until;)
+        {
+            for (int n = 0; n < 64; ++n)
+                for (int ch = 0; ch < 2; ++ch)
+                    buf.setSample (ch, n, input (y.size() + static_cast<size_t> (n)));
+            p.processBlock (buf, midi);
+            CHECK (allFinite (buf));
+            y.insert (y.end(), buf.getReadPointer (0), buf.getReadPointer (0) + 64);
+        }
+    };
+    const auto index = [&] (double seconds) { return static_cast<size_t> (seconds * sampleRate); };
     const auto sameAsInput = [&] (double from, double to)
     {
         for (size_t n = index (from); n < index (to); ++n)
@@ -654,24 +667,69 @@ void tapeCar (double sampleRate)
                 return false;
         return true;
     };
-    const auto crossings = [&] (double from, double to)
+    const auto loudest = [&] (double from, double to)
+    {
+        float m = 0.0f;
+        for (size_t n = index (from); n < index (to); ++n)
+            m = juce::jmax (m, std::abs (y[n]));
+        return m;
+    };
+    const auto pitch = [&] (double from, double to) // частота относительно входа, по переходам через ноль
     {
         int c = 0;
         for (size_t n = index (from) + 1; n < index (to); ++n)
             c += (y[n - 1] < 0.0f) != (y[n] < 0.0f);
-        return c;
+        return c / (2.0 * freq * (to - from));
     };
-    float nearStop = 0.0f;
-    for (size_t n = index (0.99); n < index (1.0); ++n)
-        nearStop = juce::jmax (nearStop, std::abs (y[n]));
-    const double pitch = static_cast<double> (crossings (0.55, 0.75)) / crossings (0.25, 0.45);
+
+    for (double curve : { -1.0, -0.4, 0.0, 0.7, 1.0 }) // обратная кривая: продолжить с текущей скорости
+        for (double x : { 0.0, 0.3, 0.9, 1.0 })
+            CHECK (std::abs (gentra::tapeCurveInverse (gentra::tapeCurve (x, curve), curve) - x) < 1.0e-9);
+
+    run (0.2);
+    CHECK (sameAsInput (0.0, 0.2)); // педаль отпущена — ровно вход
+
+    setParam (p, "tapeBrake", 1.0f); // тормоз 400 мс
+    run (0.8);
+    CHECK (p.effectLevel (gentra::car::green) > 0.99f);
+    setParam (p, "tapeBrake", 0.0f); // разгон 200 мс
+    run (0.6);
+    const double braking = pitch (0.25, 0.45), starting = pitch (1.05, 1.15);
+    std::printf ("tape %.0f Hz: pitch braking x%.2f, starting x%.2f, stopped peak %.2g\n", sampleRate, braking, starting, loudest (0.65, 1.0));
+    CHECK (braking < 0.85 && starting < 0.85);
+    CHECK (loudest (0.65, 1.0) < 1.0e-6f); // стоит — тишина
+    CHECK (sameAsInput (1.3, 1.6));         // разогналась и догнала — снова ровно вход
+
+    // По такту: тормоз 1/4 при 120 BPM — 0.5 с.
+    setParam (p, "tapeSync", 1.0f);
+    setParam (p, "tapeStopNote", 2.0f);
+    CHECK (p.apvts.getParameter ("tapeStopNote")->getCurrentValueAsText() == "1/4");
+    setParam (p, "tapeBrake", 1.0f);
+    run (0.8); // 1.6 … 2.4
+    std::printf ("tape %.0f Hz: synced 1/4 stop — at 0.42 s %.3f, after 0.55 s %.2g\n", sampleRate, loudest (2.02, 2.05), loudest (2.15, 2.4));
+    CHECK (loudest (2.02, 2.05) > 1.0e-3f && loudest (2.15, 2.4) < 1.0e-6f);
+
+    // Педаль туда-сюда посреди переходов.
+    setParam (p, "tapeBrake", 0.0f);
+    run (0.1); // разгон 1/8 = 0.25 с — на середине
+    setParam (p, "tapeBrake", 1.0f);
+    run (0.1); // тормозит с текущей скорости
+    setParam (p, "tapeBrake", 0.0f);
+    run (0.6);
     const float natural = 0.5f * static_cast<float> (juce::MathConstants<double>::twoPi * freq / sampleRate);
-    std::printf ("tape %.0f Hz: pitch while braking x%.2f, level before stop %.3f, biggest step %.4f (sine %.4f)\n",
-                 sampleRate, pitch, nearStop, biggestStep (y), natural);
-    CHECK (sameAsInput (0.25, 0.45) && sameAsInput (1.25, 1.45)); // после разгона — снова ровно вход
-    CHECK (pitch < 0.85);
-    CHECK (nearStop < 0.1f);
+    std::printf ("tape %.0f Hz: biggest step %.4f (sine %.4f)\n", sampleRate, biggestStep (y), natural);
     CHECK (biggestStep (y) < 1.5f * natural);
+    CHECK (sameAsInput (3.0, 3.2));
+
+    setParam (p, "tapeMix", 0.0f); // Mix 0 и выкл. — прозрачно, даже с нажатой педалью
+    setParam (p, "tapeBrake", 1.0f);
+    juce::Random rng (6);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
+    setParam (p, "tapeMix", 100.0f);
+    setParam (p, "tapeOn", 0.0f);
+    settle (p, sampleRate, rng);
+    CHECK (transparent (p, rng));
     p.setPlayHead (nullptr);
 }
 
@@ -773,10 +831,10 @@ void automation (double sampleRate)
                          "compAmount", "compAttack", "compRelease", "compRatio", "compMix", "reverbSize", "reverbDamping", "reverbMix",
                          "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
                          "gateDepth", "gateNote", "gateSmooth", "gateMix",
-                         "tapeAmount", "tapeEvery", "tapeSpin", "tapeMix",
+                         "tapeStopTime", "tapeStartTime", "tapeCurve", "tapeStopNote", "tapeStartNote", "tapeMix",
                          "panDepth", "panNote", "panShape", "panWidth", "panMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "compOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "panOn" })
+        for (auto id : { "delayOn", "chorusOn", "compOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "tapeBrake", "tapeSync", "panOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -1218,7 +1276,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "reverbSize", percent);
     setParam (p, "sidechainDepth", percent);
     setParam (p, "gateDepth", percent);
-    setParam (p, "tapeAmount", percent);
+    setParam (p, "tapeBrake", percent > 0.0f ? 1.0f : 0.0f);
     setParam (p, "panDepth", percent);
     {
         // Немного звука, чтобы сайдчейн и гейт были посреди шага (провал виден на машине).
@@ -1281,7 +1339,6 @@ int main (int argc, char** argv)
         sidechainCar (sampleRate);
         effectCar (sampleRate, "gateDepth", "gateMix", "gateOn");
         gateCar (sampleRate);
-        effectCar (sampleRate, "tapeAmount", "tapeMix", "tapeOn");
         tapeCar (sampleRate);
         effectCar (sampleRate, "panDepth", "panMix", "panOn");
         panCar (sampleRate);

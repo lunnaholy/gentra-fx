@@ -195,7 +195,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
     w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
     w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
-    w[green] = { "tapeAmount", "ТОРМОЗ", "%", 0, false, "tapeMix", "tapeOn" };
+    w[green] = { "tapeStopTime", "ТОРМОЗ", "мс", 0, false, "tapeMix", "tapeOn", "tapeSync", "tapeStopNote", "tapeBrake" };
     w[orange] = { "panDepth", "ГЛУБИНА", "%", 0, false, "panMix", "panOn" };
     return w;
 }();
@@ -284,8 +284,6 @@ float RoadView::strength (int car) const
         return param ("sidechainDepth") * 0.01f * param ("sidechainMix") * 0.01f;
     if (car == yellow)
         return param ("gateDepth") * 0.01f * param ("gateMix") * 0.01f;
-    if (car == green)
-        return param ("tapeAmount") * 0.01f * param ("tapeMix") * 0.01f;
     if (car == orange)
         return juce::jmax (param ("panDepth"), std::abs (param ("panWidth"))) * 0.01f * param ("panMix") * 0.01f;
     return 0.0f;
@@ -1174,7 +1172,7 @@ void RoadView::drawOverlays (juce::Graphics& g) const
             const auto* p = knobParam (w);
             const auto& info = working[static_cast<size_t> (selected)];
             const bool note = w == 0 && info.sync != nullptr && param (info.sync) > 0.5f;
-            const auto label = note ? ru ("НОТА") : w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
+            const auto label = w == 0 ? ru (info.mainLabel) : juce::String ("MIX");
             float v = p->convertFrom0to1 (p->getValue());
             if (std::abs (v) < 0.05f)
                 v = 0.0f; // без «-0.0»

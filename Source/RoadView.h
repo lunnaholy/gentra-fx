@@ -26,6 +26,7 @@ public:
         const char* on = nullptr;    // вкл/выкл
         const char* sync = nullptr;     // «по такту»: тумблер в табличке
         const char* syncMain = nullptr; // параметр заднего колеса, пока «по такту» включён (длительность ноты)
+        const char* trigger = nullptr;  // педаль: кнопка в табличке (тормоз ленты)
     };
     static const std::array<Working, numCars> working;
     static bool isWorking (int car) { return car >= 0 && working[static_cast<size_t> (car)].main != nullptr; }

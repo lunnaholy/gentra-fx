@@ -183,7 +183,8 @@ private:
     void placePopup (int numRows);
     static juce::Rectangle<int> garageArea (bool open);
     int popupRows = 3;
-    bool popupGraph = false; // табличка белой машины — шире, с графиком
+    bool popupGraph = false;   // табличка белой машины — шире, с графиком
+    bool popupTrigger = false; // у машины есть педаль — табличка шире на кнопку
 
     GentraAudioProcessor& gentraProcessor;
     juce::PropertiesFile settings { settingsFile, settingsOptions() };
@@ -195,8 +196,8 @@ private:
 
     Box popup;
     juce::ImageButton onButton, closeButton;
-    juce::TextButton syncButton;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
+    juce::TextButton syncButton, triggerButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment, triggerAttachment;
     std::array<Row, 3> rows; // до трёх доп. параметров; табличка — под их число
     EqGraph eqGraph;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;

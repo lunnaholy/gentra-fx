@@ -17,6 +17,7 @@ struct Extra
     const char* unit = "";
     int decimals = 0;
     bool sign = false; // «+» у положительных (параметр от минуса до плюса)
+    const char* syncId = nullptr; // параметр вместо id, пока у машины включено «по такту»
 };
 // Номера машин — gentra::car: 0 чёрная, 1 ржавая, 2 красная, 3 зелёная, 4 оранжевая, 5 фиолетовая, 6 синяя, 7 розовая, 8 серебряная, 9 серая, 10 жёлтая, 11 белая.
 const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
@@ -25,7 +26,7 @@ const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
     e[0] = { { { "bassFreq", "Частота", "Гц", 0 }, { "tint", "Тонировка", "%", 0 }, {} } };
     e[1] = { { { "loresBits", "Мин. биты", "бит", 1 }, { "loresRate", "Мин. частота", "кГц", 1 }, {} } };
     e[2] = { { { "distTone", "Тон", "%", 0 }, {}, {} } };
-    e[3] = { { { "tapeEvery", "Каждые", "", 0 }, { "tapeSpin", "Разгон", "%", 0 }, {} } };
+    e[3] = { { { "tapeStartTime", "Разгон", "мс", 0, false, "tapeStartNote" }, { "tapeCurve", "Кривая", "%", 0, true }, {} } };
     e[4] = { { { "panNote", "Шаг", "", 0 }, { "panShape", "Форма", "", 0 }, { "panWidth", "Ширина", "%", 0, true } } };
     e[5] = { { { "sidechainNote", "Шаг", "", 0 }, { "sidechainShape", "Форма", "%", 0 }, {} } };
     e[6] = { { { "chorusRate", "Скорость", "Гц", 2 }, { "chorusFeedback", "Возврат", "%", 0 }, {} } };
@@ -748,6 +749,16 @@ GentraAudioProcessorEditor::GentraAudioProcessorEditor (GentraAudioProcessor& p)
     syncButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     syncButton.setTitle (ru ("Дилей по темпу DAW"));
     popup.addChildComponent (syncButton);
+    // По такту — в табличке другие строки (ноты вместо миллисекунд).
+    syncButton.onClick = [this] { showPopup (road.getSelected()); };
+
+    // Педаль (тормоз ленты): нажата — подсвечена, как включённая табличка.
+    triggerButton.setButtonText (ru ("Тормоз"));
+    triggerButton.setClickingTogglesState (true);
+    triggerButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    triggerButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    triggerButton.setTitle (ru ("Педаль тормоза ленты"));
+    popup.addChildComponent (triggerButton);
 
     for (auto& row : rows)
     {
@@ -859,10 +870,11 @@ void GentraAudioProcessorEditor::placePopup (int numRows)
     const int free = garageOpen ? garageArea (true).getX() : RoadView::width;
     // Пропорции при двух строках — как у panel.png (760×213); винты в углах, поэтому поля по 34.
     // С графиком (белая) — шире: ползунки короче, график между ними и крестиком; влезает и при открытом гараже.
-    const int h = 58 + numRows * 24, w = popupGraph ? 580 : 380;
+    const int h = 58 + numRows * 24, w = popupGraph ? 580 : popupTrigger ? 490 : 380;
     popup.setBounds ((free - w) / 2, RoadView::height - 8 - h, w, h);
     onButton.setBounds (34, 12, 151, 30);
     syncButton.setBounds (196, 13, 104, 28);
+    triggerButton.setBounds (310, 13, 104, 28);
     closeButton.setBounds (w - 34 - 36, 12, 36, 30);
     for (int i = 0; i < static_cast<int> (rows.size()); ++i)
     {
@@ -891,6 +903,7 @@ void GentraAudioProcessorEditor::showPopup (int car)
 {
     onAttachment.reset();
     syncAttachment.reset();
+    triggerAttachment.reset();
     for (auto& row : rows)
         row.attachment.reset();
 
@@ -900,6 +913,7 @@ void GentraAudioProcessorEditor::showPopup (int car)
 
     const auto& carExtras = extras[static_cast<size_t> (car)];
     popupGraph = car == gentra::car::white;
+    popupTrigger = RoadView::working[static_cast<size_t> (car)].trigger != nullptr;
     placePopup (static_cast<int> (std::count_if (carExtras.begin(), carExtras.end(), [] (const Extra& e) { return e.id != nullptr; })));
 
     auto& apvts = gentraProcessor.apvts;
@@ -908,6 +922,10 @@ void GentraAudioProcessorEditor::showPopup (int car)
     syncButton.setVisible (info.sync != nullptr);
     if (info.sync != nullptr)
         syncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, info.sync, syncButton);
+    triggerButton.setVisible (info.trigger != nullptr);
+    if (info.trigger != nullptr)
+        triggerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, info.trigger, triggerButton);
+    const bool synced = info.sync != nullptr && apvts.getRawParameterValue (info.sync)->load() > 0.5f;
 
     for (size_t i = 0; i < rows.size(); ++i)
     {
@@ -918,9 +936,10 @@ void GentraAudioProcessorEditor::showPopup (int car)
         if (extra.id == nullptr)
             continue;
         row.label.setText (ru (extra.label), juce::dontSendNotification);
-        row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, extra.id, row.slider);
+        const char* id = synced && extra.syncId != nullptr ? extra.syncId : extra.id;
+        row.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, id, row.slider);
         // Attachment ставит свой форматтер — подменяем на русские единицы.
-        const auto* choice = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter (extra.id));
+        const auto* choice = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter (id));
         row.slider.textFromValueFunction = [extra, choice] (double v)
         {
             if (choice != nullptr) // длительность ноты: «1/4», «1/16T»

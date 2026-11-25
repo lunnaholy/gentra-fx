@@ -61,23 +61,25 @@ inline double sidechainDuck (double phase, double stepSeconds, double shape) noe
     return std::min (1.0, phase * stepSeconds / sidechainAttackSeconds) * std::pow (1.0 - phase, k);
 }
 
-// Остановка ленты: как часто — длительность цикла в четвертях (параметр «Каждые» — индекс в этом списке).
-constexpr int numTapeCycles = 4;
-constexpr std::array<double, numTapeCycles> tapeCycleBeats { 2.0, 4.0, 8.0, 16.0 };
-constexpr std::array<const char*, numTapeCycles> tapeCycleNames { "1/2", "1 такт", "2 такта", "4 такта" };
-constexpr int defaultTapeCycle = 1;
-constexpr double tapeMaxSeconds = 10.0;      // линия: насколько лента успевает отстать (тормоз в полцикла 4 тактов при 50 BPM)
-constexpr double tapeMinSpinSeconds = 0.005; // разгон не короче — без щелчка после остановки
-constexpr double tapeCatchUpSeconds = 0.02;  // после разгона лента отстаёт — переход на живой вход за это время
+// Тормоз ленты (как Kilohearts Tape Stop): по педали лента тормозит до остановки, отпустили — разгоняется.
+// Длительности «По такту» — в четвертях (параметры «Тормоз»/«Разгон» по нотам — индекс в этом списке).
+constexpr int numTapeNotes = 7;
+constexpr std::array<double, numTapeNotes> tapeNoteBeats { 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
+constexpr std::array<const char*, numTapeNotes> tapeNoteNames { "1/16", "1/8", "1/4", "1/2", "1 такт", "2 такта", "4 такта" };
+constexpr int defaultTapeStopNote = 3, defaultTapeStartNote = 1; // 1/2 и 1/8
+constexpr double tapeMaxSeconds = 10.0;     // линия: насколько лента успевает отстать за торможение (дольше — держим край)
+constexpr double tapeCatchUpSeconds = 0.02; // после разгона лента отстаёт — переход на живой вход за это время
 
-// Скорость ленты на фазе цикла 0..1: в конце цикла (последние brake) тормозит 1 → 0, в начале (первые spin) разгоняется 0 → 1.
-inline double tapeSpeed (double phase, double brake, double spin) noexcept
+// Кривая хода 0..1 → 0..1: curve 0 — прямая, > 0 — сначала медленно, потом резко, < 0 — наоборот.
+// Тормоз: скорость 1 − tapeCurve (ход), разгон: скорость tapeCurve (ход).
+inline double tapeCurve (double progress, double curve) noexcept
 {
-    if (brake > 0.0 && phase >= 1.0 - brake)
-        return std::max (0.0, (1.0 - phase) / brake);
-    if (spin > 0.0 && phase < spin)
-        return phase / spin;
-    return 1.0;
+    return std::pow (std::clamp (progress, 0.0, 1.0), std::pow (2.0, 2.0 * curve));
+}
+
+inline double tapeCurveInverse (double value, double curve) noexcept
+{
+    return std::pow (std::clamp (value, 0.0, 1.0), std::pow (2.0, -2.0 * curve));
 }
 
 // Автопанорама: форма движения (параметр «Форма» — индекс в этом списке).
@@ -676,6 +678,9 @@ public:
 
     // После всех каналов фрейма.
     void advance() noexcept { write = write + 1 < size ? write + 1 : 0; }
+
+    // Лента стояла (тишина) и запускается: головка встаёт на живой вход, разгон — с текущего звука.
+    void restart() noexcept { lag = 0.0; }
 
 private:
     double fs = 44100.0;

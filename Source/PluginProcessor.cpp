@@ -76,12 +76,19 @@ GentraAudioProcessor::GentraAudioProcessor()
       grey (makeStage ("reverbSize", 0.01f, "reverbDamping", 0.01f, nullptr, 0.0f, "reverbMix", "reverbOn", Stage::keep (Stage::main))),
       purple (makeStage ("sidechainDepth", 0.01f, "sidechainShape", 0.01f, nullptr, 0.0f, "sidechainMix", "sidechainOn", Stage::keep (Stage::main))),
       yellow (makeStage ("gateDepth", 0.01f, "gateSmooth", 0.01f, nullptr, 0.0f, "gateMix", "gateOn", Stage::keep (Stage::main))),
-      green (makeStage ("tapeAmount", 0.01f, "tapeSpin", 0.01f, nullptr, 0.0f, "tapeMix", "tapeOn", Stage::keep (Stage::main))),
+      // У ленты нет «силы»: включена — работает всегда, но пока педаль отпущена и лента догнала вход, звук ровно как вход.
+      green (makeStage (nullptr, 0.0f, nullptr, 0.0f, nullptr, 0.0f, "tapeMix", "tapeOn", 0)),
       orange (makeStage ("panDepth", 0.01f, "panWidth", 0.01f, nullptr, 0.0f, "panMix", "panOn",
                          Stage::keep (Stage::main) | Stage::keep (Stage::extraA))),
       sidechainNote (apvts.getRawParameterValue ("sidechainNote")),
       gateNote (apvts.getRawParameterValue ("gateNote")),
-      tapeCycle (apvts.getRawParameterValue ("tapeEvery")),
+      tapeBrake (apvts.getRawParameterValue ("tapeBrake")),
+      tapeStopMs (apvts.getRawParameterValue ("tapeStopTime")),
+      tapeStartMs (apvts.getRawParameterValue ("tapeStartTime")),
+      tapeCurvePct (apvts.getRawParameterValue ("tapeCurve")),
+      tapeSync (apvts.getRawParameterValue ("tapeSync")),
+      tapeStopNote (apvts.getRawParameterValue ("tapeStopNote")),
+      tapeStartNote (apvts.getRawParameterValue ("tapeStartNote")),
       panNote (apvts.getRawParameterValue ("panNote")),
       panShape (apvts.getRawParameterValue ("panShape")),
       delaySync (apvts.getRawParameterValue ("delaySync")),
@@ -146,9 +153,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     juce::StringArray notes;
     for (const auto* name : gentra::delayDivisionNames)
         notes.add (name);
-    juce::StringArray tapeCycles;
-    for (const auto* name : gentra::tapeCycleNames)
-        tapeCycles.add (juce::String::fromUTF8 (name));
+    juce::StringArray tapeNotes;
+    for (const auto* name : gentra::tapeNoteNames)
+        tapeNotes.add (juce::String::fromUTF8 (name));
     juce::StringArray panShapes;
     for (const auto* name : gentra::panShapeNames)
         panShapes.add (juce::String::fromUTF8 (name));
@@ -237,9 +244,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "eqHighFreq", 5 }, "EQ High Freq", skewed (1000.0f, 18000.0f, 4000.0f, 1.0f), 4000.0f, hz),
         std::make_unique<Float> (juce::ParameterID { "eqMidQ", 5 }, "EQ Mid Q", skewed (0.3f, 6.0f, 1.0f, 0.01f), 0.7f),
 
-        std::make_unique<Float> (juce::ParameterID { "tapeAmount", 5 }, "Tape Stop", percent, 0.0f, pct),
-        std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "tapeEvery", 5 }, "Tape Stop Every", tapeCycles, gentra::defaultTapeCycle),
-        std::make_unique<Float> (juce::ParameterID { "tapeSpin", 5 }, "Tape Spin Up", percent, 30.0f, pct),
+        // Тормоз ленты: v5 тормозил сам раз в цикл (tapeAmount, tapeEvery, tapeSpin), v7 — по педали, как Kilohearts Tape Stop.
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "tapeBrake", 7 }, "Tape Brake", false),
+        std::make_unique<Float> (juce::ParameterID { "tapeStopTime", 7 }, "Tape Stop Time", skewed (10.0f, 5000.0f, 500.0f, 1.0f), 600.0f, ms),
+        std::make_unique<Float> (juce::ParameterID { "tapeStartTime", 7 }, "Tape Start Time", skewed (10.0f, 5000.0f, 500.0f, 1.0f), 250.0f, ms),
+        std::make_unique<Float> (juce::ParameterID { "tapeCurve", 7 }, "Tape Curve", juce::NormalisableRange<float> (-100.0f, 100.0f, 1.0f), 0.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "tapeSync", 7 }, "Tape Sync", false),
+        std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "tapeStopNote", 7 }, "Tape Stop Note", tapeNotes, gentra::defaultTapeStopNote),
+        std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "tapeStartNote", 7 }, "Tape Start Note", tapeNotes, gentra::defaultTapeStartNote),
         std::make_unique<Float> (juce::ParameterID { "tapeMix", 5 }, "Tape Mix", percent, 100.0f, pct),
         std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "tapeOn", 5 }, "Tape On", true),
 
@@ -290,6 +302,8 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     yellow.prepare (sampleRate);
     green.prepare (sampleRate);
     tape.prepare (sampleRate);
+    tapeState = TapeState::playing;
+    tapeSpeed = 1.0;
     orange.prepare (sampleRate);
     panNow = 0.0;
     reverb.setSampleRate (sampleRate);
@@ -332,6 +346,8 @@ void GentraAudioProcessor::reset()
     yellow.snap();
     green.snap();
     tape.reset();
+    tapeState = TapeState::playing;
+    tapeSpeed = 1.0;
     orange.snap();
     panNow = 0.0;
     playingChain = chain.load();
@@ -543,33 +559,70 @@ void GentraAudioProcessor::processComp (juce::AudioBuffer<float>& buffer, int nu
     compLevel.store (static_cast<float> (juce::jmin (1.0, comp.reductionDb() / 24.0)), std::memory_order_relaxed);
 }
 
-// Цикл — по позиции хоста (без транспорта бежит сам): в конце цикла лента тормозит, в начале следующего разгоняется.
+// Педаль нажата — лента тормозит за «Тормоз» до остановки и стоит (тишина); отпущена — разгоняется за «Разгон».
+// Нажали посреди разгона (или отпустили посреди торможения) — продолжаем с текущей скорости, без скачка.
 void GentraAudioProcessor::processTape (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
 {
     green.updateTargets();
     if (! green.active() || getSampleRate() <= 0.0)
     {
         tape.reset();
+        tapeState = TapeState::playing;
+        tapeSpeed = 1.0;
         green.skip (buffer.getNumSamples());
         tapeLevel.store (0.0f, std::memory_order_relaxed);
         return;
     }
 
+    const bool sync = tapeSync->load() > 0.5f;
     const double bpm = hostBpm.load (std::memory_order_relaxed);
-    const int cycle = juce::jlimit (0, gentra::numTapeCycles - 1, juce::roundToInt (tapeCycle->load()));
-    const double cycleQuarters = gentra::tapeCycleBeats[static_cast<size_t> (cycle)];
-    const double cycleSeconds = cycleQuarters * 60.0 / bpm;
-    const double quartersPerSample = bpm / 60.0 / getSampleRate();
+    const auto seconds = [&] (std::atomic<float>* msParam, std::atomic<float>* noteParam)
+    {
+        if (! sync)
+            return msParam->load() * 0.001;
+        const int i = juce::jlimit (0, gentra::numTapeNotes - 1, juce::roundToInt (noteParam->load()));
+        return gentra::tapeNoteBeats[static_cast<size_t> (i)] * 60.0 / bpm;
+    };
+    const double stopStep = 1.0 / (juce::jmax (0.001, seconds (tapeStopMs, tapeStopNote)) * getSampleRate());
+    const double startStep = 1.0 / (juce::jmax (0.001, seconds (tapeStartMs, tapeStartNote)) * getSampleRate());
+    const double curve = tapeCurvePct->load() * 0.01;
+    // ponytail: педаль читается раз в блок — нажатие точно до блока, не до сэмпла.
+    const bool brake = tapeBrake->load() > 0.5f;
+    if (brake && (tapeState == TapeState::playing || tapeState == TapeState::starting))
+    {
+        tapeState = TapeState::stopping;
+        tapeProgress = gentra::tapeCurveInverse (1.0 - tapeSpeed, curve);
+    }
+    else if (! brake && (tapeState == TapeState::stopping || tapeState == TapeState::stopped))
+    {
+        if (tapeState == TapeState::stopped)
+            tape.restart();
+        tapeState = TapeState::starting;
+        tapeProgress = gentra::tapeCurveInverse (tapeSpeed, curve);
+    }
+
     auto* const* data = buffer.getArrayOfWritePointers();
-    double speed = 1.0;
     for (int n = 0; n < buffer.getNumSamples(); ++n)
     {
-        const double brake = 0.5 * green.next (Stage::main); // тормоз — до половины цикла
-        const double spin = juce::jmax (gentra::tapeMinSpinSeconds / cycleSeconds, brake * green.next (Stage::extraA));
+        switch (tapeState)
+        {
+            case TapeState::stopping:
+                tapeProgress += stopStep;
+                if (tapeProgress >= 1.0)
+                    tapeState = TapeState::stopped;
+                tapeSpeed = tapeState == TapeState::stopped ? 0.0 : 1.0 - gentra::tapeCurve (tapeProgress, curve);
+                break;
+            case TapeState::starting:
+                tapeProgress += startStep;
+                if (tapeProgress >= 1.0)
+                    tapeState = TapeState::playing;
+                tapeSpeed = tapeState == TapeState::playing ? 1.0 : gentra::tapeCurve (tapeProgress, curve);
+                break;
+            case TapeState::stopped: tapeSpeed = 0.0; break;
+            case TapeState::playing: tapeSpeed = 1.0; break;
+        }
         const float wet = green.next (Stage::wet);
-        const double cycles = (ppqNow + n * quartersPerSample) / cycleQuarters;
-        speed = gentra::tapeSpeed (cycles - std::floor (cycles), brake, spin);
-        tape.setSpeed (speed);
+        tape.setSpeed (tapeSpeed);
         for (int ch = 0; ch < numChannels; ++ch)
         {
             const float x = data[ch][n];
@@ -577,7 +630,7 @@ void GentraAudioProcessor::processTape (juce::AudioBuffer<float>& buffer, int nu
         }
         tape.advance();
     }
-    tapeLevel.store (static_cast<float> (1.0 - speed), std::memory_order_relaxed);
+    tapeLevel.store (static_cast<float> (1.0 - tapeSpeed), std::memory_order_relaxed);
 }
 
 // Середина (L+R)/2 гуляет по панораме с постоянной мощностью, боковой сигнал (L−R)/2 остаётся на месте и
