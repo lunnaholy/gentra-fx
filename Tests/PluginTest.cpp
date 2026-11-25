@@ -501,9 +501,10 @@ void automation (double sampleRate)
     for (int i = 0; i < 300; ++i)
     {
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
-                         "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix" })
+                         "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
+                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn" })
+        for (auto id : { "delayOn", "chorusOn", "phaserOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -581,7 +582,7 @@ void chainOrder (double sampleRate)
 
     // Декоративные местами — звук тот же, без провала: прозрачно сразу.
     auto decor = GentraAudioProcessor::defaultOrder;
-    std::swap (decor[6], decor[9]);
+    std::swap (decor[6], decor[11]); // оранжевая и жёлтая
     p.setCarOrder (decor);
     CHECK (transparent (p, rng));
 
@@ -853,6 +854,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "delayOn", percent > 0.0f ? 1.0f : 0.0f);
     setParam (p, "delayFeedback", 0.9f * percent);
     setParam (p, "chorusDepth", percent);
+    setParam (p, "phaserDepth", percent);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
     auto* gentra = dynamic_cast<GentraAudioProcessorEditor*> (editor.get());
@@ -893,6 +895,7 @@ int main (int argc, char** argv)
         equalizer (sampleRate);
         delayCar (sampleRate);
         jucePedal (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
+        jucePedal (sampleRate, "phaserDepth", "phaserMix", "phaserOn");
         automation (sampleRate);
         chainOrder (sampleRate);
     }

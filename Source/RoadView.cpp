@@ -193,6 +193,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
     w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
     w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
+    w[pink] = { "phaserDepth", "ГЛУБИНА", "%", 0, false, "phaserMix", "phaserOn" };
     return w;
 }();
 
@@ -273,6 +274,8 @@ float RoadView::strength (int car) const
         return param ("delayMix") * 0.01f * (0.5f + 0.5f * param ("delayFeedback") / 90.0f);
     if (car == blue)
         return param ("chorusDepth") * 0.01f * param ("chorusMix") * 0.01f;
+    if (car == pink)
+        return param ("phaserDepth") * 0.01f * param ("phaserMix") * 0.01f;
     return carInfo[static_cast<size_t> (car)].strength;
 }
 
@@ -877,6 +880,16 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         }
         g.setColour (rgba (120, 170, 255, 0.75f));
         g.strokePath (p, juce::PathStrokeType (0.012f));
+    }
+    else if (i == pink && strength (pink) > 0.0f)
+    {
+        // Подсветка днища: пульсирует со скоростью фэйзера, яркость от глубины и Mix.
+        const float beat = 0.5f + 0.5f * std::sin (time * 2.0f * pi * param ("phaserRate"));
+        const auto glowColour = rgba (255, 60, 150, (0.35f + 0.65f * strength (pink)) * (0.4f + 0.6f * beat));
+        juce::Graphics::ScopedSaveState s (g);
+        g.addTransform (juce::AffineTransform::scale (1.0f, 0.18f, 0.5f, 0.0f));
+        g.setGradientFill (juce::ColourGradient (glowColour, 0.5f, 0.0f, glowColour.withAlpha (0.0f), 1.1f, 0.0f, true));
+        g.fillEllipse (-0.1f, -0.6f, 1.2f, 1.2f);
     }
     else if (i == silver && on)
     {

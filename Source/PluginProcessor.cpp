@@ -71,6 +71,7 @@ GentraAudioProcessor::GentraAudioProcessor()
                         "eqMid", 1.0f)),
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
       blue (makeStage ("chorusDepth", 0.01f, "chorusRate", 1.0f, "chorusFeedback", 0.01f, "chorusMix", "chorusOn", Stage::keep (Stage::main))),
+      pink (makeStage ("phaserDepth", 0.01f, "phaserRate", 1.0f, "phaserFeedback", 0.01f, "phaserMix", "phaserOn", Stage::keep (Stage::main))),
       delaySync (apvts.getRawParameterValue ("delaySync")),
       delayNote (apvts.getRawParameterValue ("delayNote"))
 {
@@ -168,7 +169,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "chorusRate", 4 }, "Chorus Rate", lfoHz, 1.0f, hz),
         std::make_unique<Float> (juce::ParameterID { "chorusFeedback", 4 }, "Chorus Feedback", feedback, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "chorusMix", 4 }, "Chorus Mix", percent, 50.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "chorusOn", 4 }, "Chorus On", true)
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "chorusOn", 4 }, "Chorus On", true),
+
+        std::make_unique<Float> (juce::ParameterID { "phaserDepth", 4 }, "Phaser Depth", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "phaserRate", 4 }, "Phaser Rate", lfoHz, 0.5f, hz),
+        std::make_unique<Float> (juce::ParameterID { "phaserFeedback", 4 }, "Phaser Feedback", feedback, 50.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "phaserMix", 4 }, "Phaser Mix", percent, 50.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "phaserOn", 4 }, "Phaser On", true)
     };
     return layout;
 }
@@ -194,6 +201,9 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     blue.prepare (sampleRate);
     chorus.prepare (spec);
     chorus.setMix (1.0f); // Mix — свой, посэмплово
+    pink.prepare (sampleRate);
+    phaser.prepare (spec);
+    phaser.setMix (1.0f);
     chainGain.reset (sampleRate, 0.01);
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
@@ -209,6 +219,7 @@ void GentraAudioProcessor::reset()
     eq.reset();
     delay.reset();
     chorus.reset();
+    phaser.reset();
     meterLp = 0.0f;
     black.snap();
     rust.snap();
@@ -216,6 +227,7 @@ void GentraAudioProcessor::reset()
     white.snap();
     silver.snap();
     blue.snap();
+    pink.snap();
     playingChain = chain.load();
     chainGain.setCurrentAndTargetValue (1.0f);
 }
@@ -296,6 +308,17 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
                                 chorus.process (juce::dsp::ProcessContextReplacing<float> (block));
                             },
                             [this] { chorus.reset(); });
+            break;
+        case gentra::car::pink:
+            processChunked (pink, buffer, numChannels,
+                            [this] (juce::dsp::AudioBlock<float>& block, float depth, float rate, float feedback)
+                            {
+                                phaser.setDepth (depth);
+                                phaser.setRate (rate);
+                                phaser.setFeedback (feedback);
+                                phaser.process (juce::dsp::ProcessContextReplacing<float> (block));
+                            },
+                            [this] { phaser.reset(); });
             break;
         default: break;
     }
@@ -623,7 +646,8 @@ void GentraAudioProcessor::setCarOrder (const CarOrder& order)
 void GentraAudioProcessor::storeChain (const CarOrder& order) noexcept
 {
     namespace c = gentra::car;
-    constexpr int sounding = (1 << c::black) | (1 << c::rustCar) | (1 << c::red) | (1 << c::white) | (1 << c::silver) | (1 << c::blue);
+    constexpr int sounding = (1 << c::black) | (1 << c::rustCar) | (1 << c::red) | (1 << c::white) | (1 << c::silver) | (1 << c::blue)
+                            | (1 << c::pink);
     std::uint64_t packed = 0;
     int shift = 0;
     for (int car : order)
