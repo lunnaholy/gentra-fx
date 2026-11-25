@@ -4,7 +4,8 @@ set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>") # статический CRT: плагин не требует VC++ Redistributable
 
-project(SauceGentraFX VERSION 1.0.0 LANGUAGES C CXX)
+set(GENTRA_VERSION "1.0.0" CACHE STRING "Версия плагина; в релизе CI подставляет её из тега")
+project(SauceGentraFX VERSION ${GENTRA_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

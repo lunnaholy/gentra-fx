@@ -1,0 +1,91 @@
+# Сборка и релиз плагина. Запускается только по тегу версии:
+#   git tag v1.2.0 && git push origin v1.2.0
+# Версия плагина берётся из тега. На обычные коммиты ничего не собирается: репозиторий приватный,
+# а минута macOS-раннера стоит как десять минут Linux.
+# Пробная сборка без релиза — кнопкой Run workflow во вкладке Actions (архивы лежат в артефактах запуска).
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, name: macOS-arm64 }
+          - { os: windows-latest, name: Windows-x64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "cmake=-DGENTRA_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT" # версия внутри плагина — из CMakeLists.txt
+          fi
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENTRA_COPY_AFTER_BUILD=OFF ${{ steps.version.outputs.cmake }}
+          cmake --build build --config Release --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          out="Sauce Gentra FX ${{ steps.version.outputs.name }}"
+          mkdir "$out"
+          cd build/SauceGentraFX_artefacts/Release
+          ditto "VST3/Sauce Gentra FX.vst3" "../../../$out/Sauce Gentra FX.vst3"
+          ditto "AU/Sauce Gentra FX.component" "../../../$out/Sauce Gentra FX.component"
+          ditto "Standalone/Sauce Gentra FX.app" "../../../$out/Sauce Gentra FX.app"
+          cd ../../..
+          ditto -c -k --keepParent "$out" "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "Sauce Gentra FX ${{ steps.version.outputs.name }}"
+          New-Item -ItemType Directory $out | Out-Null
+          Copy-Item -Recurse "build/SauceGentraFX_artefacts/Release/VST3/Sauce Gentra FX.vst3" $out
+          Copy-Item "build/SauceGentraFX_artefacts/Release/Standalone/Sauce Gentra FX.exe" $out
+          Compress-Archive $out "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: Sauce-Gentra-FX-*.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Sauce Gentra FX ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md --generate-notes
