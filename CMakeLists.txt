@@ -11,6 +11,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# MSVC: компилировать файлы параллельно — без этого Visual Studio собирает JUCE по одному файлу.
+add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/MP>)
+
 include(FetchContent)
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
