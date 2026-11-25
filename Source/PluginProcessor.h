@@ -115,6 +115,7 @@ private:
     Stage black, rust, red, white, silver, blue, pink, grey, purple, yellow, green, orange;
     std::atomic<float>* sidechainNote; // индекс в gentra::delayDivisionNames
     std::atomic<float>* gateNote;
+    std::atomic<float>* sidechainOffset; // −50…+50 % шага
     // Тормоз ленты: педаль, времена (мс или ноты из gentra::tapeNoteNames), кривая.
     std::atomic<float>* tapeBrake;
     std::atomic<float>* tapeStopMs;

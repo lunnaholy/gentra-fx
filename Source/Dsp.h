@@ -101,6 +101,13 @@ inline double panLfo (double phase, int shape, double random) noexcept
     }
 }
 
+// Сдвиг кривой сайдчейна (как Nudge в Kickstart): offset −0.5…+0.5 шага, плюс — провал позже доли.
+inline double shiftedPhase (double phase, double offset) noexcept
+{
+    const double p = phase - offset;
+    return p - std::floor (p);
+}
+
 constexpr double gateMinRampSeconds = 0.001; // фронт гейта при Плавности 0 — без щелчка
 constexpr int defaultGateDivision = 9;       // 1/16
 

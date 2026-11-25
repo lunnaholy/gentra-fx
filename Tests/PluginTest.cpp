@@ -590,6 +590,16 @@ void sidechainCar (double sampleRate)
     for (size_t n = 1; n < free.size(); ++n)
         dips += free[n] < 0.1f && free[n - 1] >= 0.1f;
     CHECK (dips == 2);
+
+    // Сдвиг +25%: провал на четверть шага позже доли (0.5 с → 0.625 с), на самой доле громкость ещё не упала.
+    setParam (p, "sidechainOffset", 25.0f);
+    head.info.setIsPlaying (true);
+    p.reset();
+    const auto shifted = stepRun (p, head, sampleRate, 1.0);
+    const auto shiftedAt = [&] (double seconds) { return shifted[static_cast<size_t> (juce::roundToInt (seconds * sampleRate))]; };
+    std::printf ("sidechain %.0f Hz: offset +25%% — at beat %.3f, 6 ms after shifted dip %.3f\n", sampleRate, shiftedAt (0.506), shiftedAt (0.631));
+    CHECK (shiftedAt (0.506) > 0.3f && shiftedAt (0.631) < 0.1f);
+    CHECK (biggestStep (shifted) < 0.01f);
     p.setPlayHead (nullptr);
 }
 
@@ -829,7 +839,7 @@ void automation (double sampleRate)
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
                          "compAmount", "compAttack", "compRelease", "compRatio", "compMix", "reverbSize", "reverbDamping", "reverbMix",
-                         "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
+                         "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainOffset", "sidechainMix",
                          "gateDepth", "gateNote", "gateSmooth", "gateMix",
                          "tapeStopTime", "tapeStartTime", "tapeCurve", "tapeStopNote", "tapeStartNote", "tapeMix",
                          "panDepth", "panNote", "panShape", "panWidth", "panMix" })
@@ -1201,6 +1211,9 @@ void duckGraph()
     CHECK (graph.gainAt (0.1) > 0.999f); // глубина 0 — ровная линия
     setParam (p, "sidechainDepth", 100.0f);
     CHECK (graph.gainAt (0.05) < 0.1f && std::abs (graph.gainAt (0.95) - 0.95f) < 0.01f); // Форма 50% — прямой возврат
+    setParam (p, "sidechainOffset", 25.0f); // кривая на экране сдвигается вместе со звуком
+    CHECK (graph.gainAt (0.3) < 0.1f && graph.gainAt (0.05) > 0.2f);
+    setParam (p, "sidechainOffset", 0.0f);
 
     FakeHead head;
     head.info.setIsPlaying (true);

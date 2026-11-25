@@ -82,6 +82,7 @@ GentraAudioProcessor::GentraAudioProcessor()
                          Stage::keep (Stage::main) | Stage::keep (Stage::extraA))),
       sidechainNote (apvts.getRawParameterValue ("sidechainNote")),
       gateNote (apvts.getRawParameterValue ("gateNote")),
+      sidechainOffset (apvts.getRawParameterValue ("sidechainOffset")),
       tapeBrake (apvts.getRawParameterValue ("tapeBrake")),
       tapeStopMs (apvts.getRawParameterValue ("tapeStopTime")),
       tapeStartMs (apvts.getRawParameterValue ("tapeStartTime")),
@@ -232,6 +233,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "sidechainShape", 4 }, "Sidechain Shape", percent, 50.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "sidechainMix", 4 }, "Sidechain Mix", percent, 100.0f, pct),
         std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "sidechainOn", 4 }, "Sidechain On", true),
+        std::make_unique<Float> (juce::ParameterID { "sidechainOffset", 8 }, "Sidechain Offset", juce::NormalisableRange<float> (-50.0f, 50.0f, 0.1f), 0.0f, pct),
 
         std::make_unique<Float> (juce::ParameterID { "gateDepth", 4 }, "Gate Depth", percent, 0.0f, pct),
         std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "gateNote", 4 }, "Gate Note", notes, gentra::defaultGateDivision),
@@ -517,7 +519,8 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
             break;
         case gentra::car::purple:
             processStepGain (purple, sidechainNote, duckLevel, buffer, numChannels,
-                             [] (double phase, double stepSeconds, float shape) { return gentra::sidechainDuck (phase, stepSeconds, shape); });
+                             [offset = sidechainOffset->load() * 0.01] (double phase, double stepSeconds, float shape)
+                             { return gentra::sidechainDuck (gentra::shiftedPhase (phase, offset), stepSeconds, shape); });
             break;
         case gentra::car::yellow:
             processStepGain (yellow, gateNote, gateLevel, buffer, numChannels,

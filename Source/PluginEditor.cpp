@@ -28,7 +28,7 @@ const std::array<std::array<Extra, 3>, RoadView::numCars> extras = []
     e[2] = { { { "distTone", "Тон", "%", 0 }, {}, {} } };
     e[3] = { { { "tapeStartTime", "Разгон", "мс", 0, false, "tapeStartNote" }, { "tapeCurve", "Кривая", "%", 0, true }, {} } };
     e[4] = { { { "panNote", "Шаг", "", 0 }, { "panShape", "Форма", "", 0 }, { "panWidth", "Ширина", "%", 0, true } } };
-    e[5] = { { { "sidechainNote", "Шаг", "", 0 }, { "sidechainShape", "Форма", "%", 0 }, {} } };
+    e[5] = { { { "sidechainNote", "Шаг", "", 0 }, { "sidechainShape", "Форма", "%", 0 }, { "sidechainOffset", "Сдвиг", "%", 0, true } } };
     e[6] = { { { "chorusRate", "Скорость", "Гц", 2 }, { "chorusFeedback", "Возврат", "%", 0 }, {} } };
     e[7] = { { { "compAttack", "Атака", "мс", 1 }, { "compRelease", "Отпускание", "мс", 0 }, { "compRatio", "Степень", ": 1", 1 } } };
     e[8] = { { { "delayFeedback", "Повторы", "%", 0 }, { "delayTone", "Тон", "%", 0 }, {} } };
@@ -549,7 +549,8 @@ float DuckGraph::gainAt (double phase) const
 {
     const double stepSeconds = gentra::delayDivisionSeconds (value ("sidechainNote"), processor.tempo());
     const float amount = value ("sidechainOn") > 0.5f ? value ("sidechainDepth") * value ("sidechainMix") * 1.0e-4f : 0.0f;
-    return 1.0f - amount * static_cast<float> (gentra::sidechainDuck (phase, stepSeconds, value ("sidechainShape") * 0.01));
+    const double shifted = gentra::shiftedPhase (phase, value ("sidechainOffset") * 0.01);
+    return 1.0f - amount * static_cast<float> (gentra::sidechainDuck (shifted, stepSeconds, value ("sidechainShape") * 0.01));
 }
 
 void DuckGraph::paint (juce::Graphics& g)
@@ -568,7 +569,7 @@ void DuckGraph::paint (juce::Graphics& g)
     }
     g.setColour (juce::Colours::white.withAlpha (0.3f));
     g.setFont (RoadView::font (10.0f));
-    g.drawText (processor.apvts.getParameter ("sidechainNote")->getCurrentValueAsText(), r.withHeight (11.0f).withTrimmedRight (2.0f),
+    g.drawText (processor.apvts.getParameter ("sidechainNote")->getCurrentValueAsText(), r.withTop (r.getBottom() - 11.0f).withTrimmedRight (2.0f),
                 juce::Justification::centredRight);
     const auto plot = bounds.reduced (6.0f, 6.0f);
     const auto yOf = [&] (float gain) { return plot.getBottom() - plot.getHeight() * gain; };
