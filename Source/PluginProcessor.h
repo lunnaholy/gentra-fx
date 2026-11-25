@@ -128,7 +128,9 @@ private:
     // ровно столько каналов, сколько при prepare.
     static constexpr int fxChunk = 32;
     juce::dsp::Chorus<float> chorus;
-    juce::dsp::Phaser<float> phaser;
+    gentra::Compressor comp;
+    std::atomic<float> compLevel { 0.0f };
+    void processComp (juce::AudioBuffer<float>&, int numChannels) noexcept;
     juce::Reverb reverb;
     juce::dsp::DelayLine<float> preDelay;
     std::atomic<float>* delaySync;

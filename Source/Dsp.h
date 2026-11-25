@@ -558,6 +558,63 @@ private:
     Biquad tone;
     int countdown = 0;
 };
+constexpr double compMaxThresholdDb = -36.0; // порог компрессора при «Сжатии» 100% (0% — порог 0 дБ)
+constexpr double compKneeDb = 6.0;           // мягкое колено
+constexpr double compMakeupShare = 0.5;      // автоподъём громкости: такая доля подавления, которое получил бы сигнал 0 дБFS
+
+// Розовая машина: компрессор с одним главным регулятором. Каналы сцеплены (общий детектор пика), стерео не плывёт.
+// Порог опускается со «Сжатием», громкость поднимается обратно автоматически (половина подавления у 0 дБFS).
+class Compressor
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        fs = sampleRate;
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        reduction = 0.0;
+        last = { -1.0f, -1.0f, -1.0f, -1.0f };
+    }
+
+    // Раз в сэмпл-фрейм: amount 0..1, атака и отпускание в мс, степень (ratio) ≥ 1.
+    void setParams (float amount, float attackMs, float releaseMs, float ratio) noexcept
+    {
+        if (changed (amount, last[0]) || changed (ratio, last[3]))
+        {
+            threshold = compMaxThresholdDb * static_cast<double> (amount);
+            slope = 1.0 - 1.0 / static_cast<double> (ratio);
+            makeup = -threshold * slope * compMakeupShare;
+        }
+        if (changed (attackMs, last[1]))
+            attack = 1.0 - std::exp (-1.0 / (0.001 * static_cast<double> (attackMs) * fs));
+        if (changed (releaseMs, last[2]))
+            release = 1.0 - std::exp (-1.0 / (0.001 * static_cast<double> (releaseMs) * fs));
+        last = { amount, attackMs, releaseMs, ratio };
+    }
+
+    // Пик фрейма по всем каналам → множитель громкости для этого фрейма.
+    float gainFor (float peak) noexcept
+    {
+        const double over = 20.0 * std::log10 (std::max (1.0e-9, static_cast<double> (peak))) - threshold;
+        const double half = compKneeDb * 0.5;
+        const double target = over <= -half ? 0.0
+                            : over >= half  ? over * slope
+                                            : slope * (over + half) * (over + half) / (2.0 * compKneeDb);
+        reduction += (target - reduction) * (target > reduction ? attack : release);
+        return static_cast<float> (std::pow (10.0, (makeup - reduction) / 20.0));
+    }
+
+    double reductionDb() const noexcept { return reduction; } // текущее подавление, дБ ≥ 0
+
+private:
+    double fs = 44100.0;
+    double threshold = 0.0, slope = 0.75, makeup = 0.0, attack = 1.0, release = 1.0, reduction = 0.0;
+    std::array<float, 4> last {};
+};
+
 // Зелёная машина: лента, которая тормозит и разгоняется. Головка чтения едет со скоростью speed, запись — всегда 1,
 // поэтому при торможении лента отстаёт (lag растёт) и звук опускается вниз по высоте; громкость гаснет у самой остановки.
 // Разогнавшись, лента отстаёт на половину разгона — за tapeCatchUpSeconds плавно переходим на живой вход.

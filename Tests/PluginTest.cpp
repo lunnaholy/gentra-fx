@@ -593,6 +593,40 @@ void sidechainCar (double sampleRate)
     p.setPlayHead (nullptr);
 }
 
+// Розовая: громкий и тихий синус после компрессора ближе друг к другу, громкость поднята обратно, стерео не плывёт.
+void compCar (double sampleRate)
+{
+    GentraAudioProcessor p;
+    p.setRateAndBufferSizeDetails (sampleRate, 512);
+    p.prepareToPlay (sampleRate, 512);
+    juce::MidiBuffer midi;
+    setParam (p, "compAmount", 100.0f); // порог −36 дБ, степень 4:1
+    p.reset();
+    // Амплитуда на выходе в установившемся режиме; правый канал вдвое тише левого.
+    const auto steady = [&] (float amp)
+    {
+        juce::AudioBuffer<float> buf (2, static_cast<int> (sampleRate));
+        for (int n = 0; n < buf.getNumSamples(); ++n)
+        {
+            const auto x = amp * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 200.0 * n / sampleRate));
+            buf.setSample (0, n, x);
+            buf.setSample (1, n, 0.5f * x);
+        }
+        p.processBlock (buf, midi);
+        CHECK (allFinite (buf));
+        const int tail = buf.getNumSamples() / 2;
+        const float left = buf.getMagnitude (0, tail, tail), right = buf.getMagnitude (1, tail, tail);
+        CHECK (std::abs (right / left - 0.5f) < 0.01f); // каналы сцеплены
+        return left;
+    };
+    const float loud = steady (0.5f);
+    CHECK (p.effectLevel (gentra::car::pink) > 0.5f); // громкий жмётся сильно — машину сплющивает
+    const float quiet = steady (0.05f);
+    std::printf ("comp %.0f Hz: in 0.5 -> %.3f, in 0.05 -> %.3f (ratio %.2f, was 10)\n", sampleRate, loud, quiet, loud / quiet);
+    CHECK (loud / quiet > 1.3f && loud / quiet < 2.5f); // 20 дБ разницы сжаты до ~5 дБ
+    CHECK (loud > 0.1f && loud < 0.5f);                  // автоподъём: не утонуло и не выросло
+}
+
 // Зелёная: раз в цикл лента тормозит (высота падает, у остановки тишина) и разгоняется, затем звук снова
 // ровно как вход; переходы без щелчков.
 void tapeCar (double sampleRate)
@@ -736,13 +770,13 @@ void automation (double sampleRate)
     {
         for (auto id : { "eqVolume", "eqLow", "eqMid", "eqHigh", "eqMix", "delayTime", "delayNote", "delayFeedback", "delayTone", "delayMix", "drive", "bass",
                          "chorusDepth", "chorusRate", "chorusFeedback", "chorusMix",
-                         "phaserDepth", "phaserRate", "phaserFeedback", "phaserMix", "reverbSize", "reverbDamping", "reverbMix",
+                         "compAmount", "compAttack", "compRelease", "compRatio", "compMix", "reverbSize", "reverbDamping", "reverbMix",
                          "sidechainDepth", "sidechainNote", "sidechainShape", "sidechainMix",
                          "gateDepth", "gateNote", "gateSmooth", "gateMix",
                          "tapeAmount", "tapeEvery", "tapeSpin", "tapeMix",
                          "panDepth", "panNote", "panShape", "panWidth", "panMix" })
             any (id);
-        for (auto id : { "delayOn", "chorusOn", "phaserOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "panOn" })
+        for (auto id : { "delayOn", "chorusOn", "compOn", "reverbOn", "sidechainOn", "gateOn", "tapeOn", "panOn" })
             setParam (p, id, rng.nextBool() ? 1.0f : 0.0f);
         setParam (p, "delaySync", rng.nextBool() ? 1.0f : 0.0f);
         juce::AudioBuffer<float> buf (2, 1 + rng.nextInt (700));
@@ -1155,7 +1189,7 @@ int snapshot (const char* path, float percent, int frames, int car, double scale
     setParam (p, "delayOn", percent > 0.0f ? 1.0f : 0.0f);
     setParam (p, "delayFeedback", 0.9f * percent);
     setParam (p, "chorusDepth", percent);
-    setParam (p, "phaserDepth", percent);
+    setParam (p, "compAmount", percent);
     setParam (p, "reverbSize", percent);
     setParam (p, "sidechainDepth", percent);
     setParam (p, "gateDepth", percent);
@@ -1212,7 +1246,8 @@ int main (int argc, char** argv)
         equalizer (sampleRate);
         delayCar (sampleRate);
         effectCar (sampleRate, "chorusDepth", "chorusMix", "chorusOn");
-        effectCar (sampleRate, "phaserDepth", "phaserMix", "phaserOn");
+        effectCar (sampleRate, "compAmount", "compMix", "compOn");
+        compCar (sampleRate);
         effectCar (sampleRate, "reverbSize", "reverbMix", "reverbOn");
         reverbCar (sampleRate);
         effectCar (sampleRate, "sidechainDepth", "sidechainMix", "sidechainOn");

@@ -71,7 +71,8 @@ GentraAudioProcessor::GentraAudioProcessor()
                         "eqMid", 1.0f)),
       silver (makeStage ("delayTime", 0.001f, "delayFeedback", 0.01f, "delayTone", 0.01f, "delayMix", "delayOn", 0)),
       blue (makeStage ("chorusDepth", 0.01f, "chorusRate", 1.0f, "chorusFeedback", 0.01f, "chorusMix", "chorusOn", Stage::keep (Stage::main))),
-      pink (makeStage ("phaserDepth", 0.01f, "phaserRate", 1.0f, "phaserFeedback", 0.01f, "phaserMix", "phaserOn", Stage::keep (Stage::main))),
+      pink (makeStage ("compAmount", 0.01f, "compAttack", 1.0f, "compRelease", 1.0f, "compMix", "compOn", Stage::keep (Stage::main),
+                       "compRatio", 1.0f)),
       grey (makeStage ("reverbSize", 0.01f, "reverbDamping", 0.01f, nullptr, 0.0f, "reverbMix", "reverbOn", Stage::keep (Stage::main))),
       purple (makeStage ("sidechainDepth", 0.01f, "sidechainShape", 0.01f, nullptr, 0.0f, "sidechainMix", "sidechainOn", Stage::keep (Stage::main))),
       yellow (makeStage ("gateDepth", 0.01f, "gateSmooth", 0.01f, nullptr, 0.0f, "gateMix", "gateOn", Stage::keep (Stage::main))),
@@ -132,6 +133,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
     };
     const auto decibels = decibelRange (12.0f), gainDb = decibelRange (24.0f);
     const auto dB = Attributes().withLabel ("dB");
+    const auto ms = Attributes().withLabel ("ms");
 
     juce::NormalisableRange<float> delayMs (60.0f, 600.0f, 1.0f);
     delayMs.setSkewForCentre (200.0f);
@@ -204,11 +206,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout GentraAudioProcessor::create
         std::make_unique<Float> (juce::ParameterID { "chorusMix", 4 }, "Chorus Mix", percent, 50.0f, pct),
         std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "chorusOn", 4 }, "Chorus On", true),
 
-        std::make_unique<Float> (juce::ParameterID { "phaserDepth", 4 }, "Phaser Depth", percent, 0.0f, pct),
-        std::make_unique<Float> (juce::ParameterID { "phaserRate", 4 }, "Phaser Rate", lfoHz, 0.5f, hz),
-        std::make_unique<Float> (juce::ParameterID { "phaserFeedback", 4 }, "Phaser Feedback", feedback, 50.0f, pct),
-        std::make_unique<Float> (juce::ParameterID { "phaserMix", 4 }, "Phaser Mix", percent, 50.0f, pct),
-        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "phaserOn", 4 }, "Phaser On", true),
+        // Розовая была фэйзером (phaser*, v4) — теперь компрессор.
+        std::make_unique<Float> (juce::ParameterID { "compAmount", 6 }, "Compressor Amount", percent, 0.0f, pct),
+        std::make_unique<Float> (juce::ParameterID { "compAttack", 6 }, "Compressor Attack", skewed (0.1f, 100.0f, 10.0f, 0.1f), 10.0f, ms),
+        std::make_unique<Float> (juce::ParameterID { "compRelease", 6 }, "Compressor Release", skewed (10.0f, 1000.0f, 120.0f, 1.0f), 120.0f, ms),
+        std::make_unique<Float> (juce::ParameterID { "compRatio", 6 }, "Compressor Ratio", skewed (1.5f, 20.0f, 4.0f, 0.1f), 4.0f,
+                                 Attributes().withLabel (":1")),
+        std::make_unique<Float> (juce::ParameterID { "compMix", 6 }, "Compressor Mix", percent, 100.0f, pct),
+        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "compOn", 6 }, "Compressor On", true),
 
         std::make_unique<Float> (juce::ParameterID { "reverbSize", 4 }, "Reverb Size", percent, 0.0f, pct),
         std::make_unique<Float> (juce::ParameterID { "reverbDamping", 4 }, "Reverb Damping", percent, 50.0f, pct),
@@ -279,8 +284,7 @@ void GentraAudioProcessor::prepareToPlay (double sampleRate, int)
     chorus.prepare (spec);
     chorus.setMix (1.0f); // Mix — свой, посэмплово
     pink.prepare (sampleRate);
-    phaser.prepare (spec);
-    phaser.setMix (1.0f);
+    comp.prepare (sampleRate);
     grey.prepare (sampleRate);
     purple.prepare (sampleRate);
     yellow.prepare (sampleRate);
@@ -312,7 +316,7 @@ void GentraAudioProcessor::reset()
         eqShape[i].setCurrentAndTargetValue (eqShapeRaw[i]->load());
     delay.reset();
     chorus.reset();
-    phaser.reset();
+    comp.reset();
     reverb.reset();
     preDelay.reset();
     meterLp = 0.0f;
@@ -433,6 +437,7 @@ float GentraAudioProcessor::effectLevel (int car) const noexcept
          : car == gentra::car::yellow ? gateLevel.load (std::memory_order_relaxed)
          : car == gentra::car::green  ? tapeLevel.load (std::memory_order_relaxed)
          : car == gentra::car::orange ? panLevel.load (std::memory_order_relaxed)
+         : car == gentra::car::pink   ? compLevel.load (std::memory_order_relaxed)
                                       : 0.0f;
 }
 
@@ -462,17 +467,7 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
                             },
                             [this] { chorus.reset(); });
             break;
-        case gentra::car::pink:
-            processChunked (pink, buffer, numChannels,
-                            [this] (juce::dsp::AudioBlock<float>& block, float depth, float rate, float feedback)
-                            {
-                                phaser.setDepth (depth);
-                                phaser.setRate (rate);
-                                phaser.setFeedback (feedback);
-                                phaser.process (juce::dsp::ProcessContextReplacing<float> (block));
-                            },
-                            [this] { phaser.reset(); });
-            break;
+        case gentra::car::pink: processComp (buffer, numChannels); break;
         case gentra::car::grey:
             processChunked (grey, buffer, numChannels,
                             [this] (juce::dsp::AudioBlock<float>& block, float size, float damping, float)
@@ -515,6 +510,37 @@ void GentraAudioProcessor::processCar (int car, juce::AudioBuffer<float>& buffer
         case gentra::car::orange: processPan (buffer, numChannels); break;
         default: break;
     }
+}
+
+// Посэмплово: пик фрейма по всем каналам → общий множитель (каналы сцеплены).
+void GentraAudioProcessor::processComp (juce::AudioBuffer<float>& buffer, int numChannels) noexcept
+{
+    pink.updateTargets();
+    if (! pink.active())
+    {
+        comp.reset();
+        pink.skip (buffer.getNumSamples());
+        compLevel.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+    auto* const* data = buffer.getArrayOfWritePointers();
+    for (int n = 0; n < buffer.getNumSamples(); ++n)
+    {
+        const float amount = pink.next (Stage::main);
+        const float attack = pink.next (Stage::extraA);
+        const float release = pink.next (Stage::extraB);
+        const float ratio = pink.next (Stage::extraC);
+        const float wet = pink.next (Stage::wet);
+        comp.setParams (amount, attack, release, ratio);
+        float peak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            peak = juce::jmax (peak, std::abs (data[ch][n]));
+        const float gain = 1.0f + wet * (comp.gainFor (peak) - 1.0f); // Mix — параллельное сжатие
+        for (int ch = 0; ch < numChannels; ++ch)
+            data[ch][n] *= gain;
+    }
+    // Для визуала: 0 — не жмёт, 1 — подавление 24 дБ и больше.
+    compLevel.store (static_cast<float> (juce::jmin (1.0, comp.reductionDb() / 24.0)), std::memory_order_relaxed);
 }
 
 // Цикл — по позиции хоста (без транспорта бежит сам): в конце цикла лента тормозит, в начале следующего разгоняется.

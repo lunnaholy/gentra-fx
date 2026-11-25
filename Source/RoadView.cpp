@@ -95,7 +95,7 @@ const std::array<CarInfo, RoadView::numCars> carInfo { {
     { "car_blue_png", "Хорус", "Hongqi E-QM5", 0xff15161a,
       { 0.2026f, 0.8118f, 0.0806f, 0.0805f, { 0.955f, 0.16f }, { 0.05f, 0.2f }, { 0.665f, 0.24f }, { 0.04f, 0.07f } } },
     // Лисян: повторитель в зеркале
-    { "car_pink_png", "Фэйзер", "Лисян", 0xffff5fa2,
+    { "car_pink_png", "Компрессор", "Лисян", 0xffff5fa2,
       { 0.216f, 0.8189f, 0.0888f, 0.0889f, { 0.95f, 0.205f }, { 0.06f, 0.25f }, { 0.665f, 0.255f }, { 0.04f, 0.1f } } },
     // BYD Song Plus: повторитель в зеркале
     { "car_silver_png", "Дилей", "BYD Song Plus", 0xffa3acb6,
@@ -191,7 +191,7 @@ const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
     w[white] = { "eqVolume", "ГРОМКОСТЬ", "дБ", 1, true, "eqMix", "eqOn" };
     w[silver] = { "delayTime", "ВРЕМЯ", "мс", 0, false, "delayMix", "delayOn", "delaySync", "delayNote" };
     w[blue] = { "chorusDepth", "ГЛУБИНА", "%", 0, false, "chorusMix", "chorusOn" };
-    w[pink] = { "phaserDepth", "ГЛУБИНА", "%", 0, false, "phaserMix", "phaserOn" };
+    w[pink] = { "compAmount", "СЖАТИЕ", "%", 0, false, "compMix", "compOn" };
     w[grey] = { "reverbSize", "РАЗМЕР", "%", 0, false, "reverbMix", "reverbOn" };
     w[purple] = { "sidechainDepth", "ГЛУБИНА", "%", 0, false, "sidechainMix", "sidechainOn" };
     w[yellow] = { "gateDepth", "ГЛУБИНА", "%", 0, false, "gateMix", "gateOn" };
@@ -277,7 +277,7 @@ float RoadView::strength (int car) const
     if (car == blue)
         return param ("chorusDepth") * 0.01f * param ("chorusMix") * 0.01f;
     if (car == pink)
-        return param ("phaserDepth") * 0.01f * param ("phaserMix") * 0.01f;
+        return param ("compAmount") * 0.01f * param ("compMix") * 0.01f;
     if (car == grey)
         return param ("reverbSize") * 0.01f * param ("reverbMix") * 0.01f;
     if (car == purple)
@@ -897,16 +897,6 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         g.setColour (rgba (120, 170, 255, 0.75f));
         g.strokePath (p, juce::PathStrokeType (0.012f));
     }
-    else if (i == pink && strength (pink) > 0.0f)
-    {
-        // Подсветка днища: пульсирует со скоростью фэйзера, яркость от глубины и Mix.
-        const float beat = 0.5f + 0.5f * std::sin (time * 2.0f * pi * param ("phaserRate"));
-        const auto glowColour = rgba (255, 60, 150, (0.35f + 0.65f * strength (pink)) * (0.4f + 0.6f * beat));
-        juce::Graphics::ScopedSaveState s (g);
-        g.addTransform (juce::AffineTransform::scale (1.0f, 0.18f, 0.5f, 0.0f));
-        g.setGradientFill (juce::ColourGradient (glowColour, 0.5f, 0.0f, glowColour.withAlpha (0.0f), 1.1f, 0.0f, true));
-        g.fillEllipse (-0.1f, -0.6f, 1.2f, 1.2f);
-    }
     else if (i == silver && on)
     {
         // Повторы: копии сзади — шаг от времени, число и затухание от повторов, прозрачность от Mix.
@@ -957,8 +947,10 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         if (i == black && blackMix > 0.0f)
             g.addTransform (juce::AffineTransform::translation (0.0f, 0.009f * sub * blackMix * juce::jmax (0.0f, 1.0f - phase * 3.0f)));
 
-        // Сайдчейн: кузов приседает на колёсах вместе с провалом громкости.
-        drawInCarUnits (g, body, alpha, juce::AffineTransform::translation (0.0f, i == purple ? -0.03f * level (purple) : 0.0f));
+        // Сайдчейн: кузов приседает на колёсах вместе с провалом громкости; компрессор: кузов сплющивается к асфальту,
+        // чем сильнее подавление.
+        drawInCarUnits (g, body, alpha, juce::AffineTransform::translation (0.0f, i == purple ? -0.03f * level (purple) : 0.0f)
+                                            .scaled (1.0f, i == pink ? 1.0f - 0.12f * level (pink) : 1.0f));
         if (i == yellow && strength (yellow) > 0.0f)
         {
             // Шашечки такси на крыше: горят, пока гейт открыт, гаснут, когда закрыт.
