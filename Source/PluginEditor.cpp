@@ -51,6 +51,33 @@ void drawNine (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float>
                          { dx[col], dy[row], dx[col + 1] - dx[col], dy[row + 1] - dy[row] });
 }
 
+}
+
+void Panel::draw (juce::Graphics& g, juce::Rectangle<float> area, float corner)
+{
+    const float scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+    const int w = juce::roundToInt (area.getWidth() * scale), h = juce::roundToInt (area.getHeight() * scale);
+    if (w <= 0 || h <= 0)
+        return;
+    auto found = std::find_if (ready.begin(), ready.end(), [&] (const juce::Image& i) { return i.getWidth() == w && i.getHeight() == h; });
+    if (found == ready.end())
+    {
+        found = ready.begin() + static_cast<std::ptrdiff_t> (next);
+        next = (next + 1) % ready.size();
+        *found = juce::Image (juce::Image::ARGB, w, h, true);
+        juce::Graphics cg (*found);
+        cg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        cg.addTransform (juce::AffineTransform::scale (static_cast<float> (w) / area.getWidth(), static_cast<float> (h) / area.getHeight()));
+        drawNine (cg, source, area.withZeroOrigin(), 70, corner);
+    }
+    // В пикселях экрана, один к одному: сжатие даже на долю пикселя у CoreGraphics на порядок дороже копирования.
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::AffineTransform::scale (1.0f / scale));
+    g.drawImageAt (*found, juce::roundToInt (area.getX() * scale), juce::roundToInt (area.getY() * scale));
+}
+
+namespace
+{
 void rotate (juce::Component& c, float deg)
 {
     c.setTransform (juce::AffineTransform::rotation (deg * degrees, c.getBounds().toFloat().getCentreX(), c.getBounds().toFloat().getCentreY()));
@@ -75,7 +102,7 @@ juce::Font BoxLook::getLabelFont (juce::Label&)
 void BoxLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
 {
     g.setOpacity (1.0f);
-    drawNine (g, panel, b.getLocalBounds().toFloat(), 70, 14.0f);
+    panel.draw (g, b.getLocalBounds().toFloat(), 14.0f);
     if (b.getToggleState()) // включённая табличка — подсвечена, как дуга ручки
     {
         g.setColour (juce::Colour (0xffe8a23a).withAlpha (0.55f));
@@ -124,7 +151,7 @@ void BoxLook::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int 
 void Box::paint (juce::Graphics& g)
 {
     g.setOpacity (1.0f);
-    drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
+    image.draw (g, getLocalBounds().toFloat(), 35.0f);
 }
 
 // ---------------- о плагине ----------------
@@ -184,7 +211,7 @@ void AboutBox::paint (juce::Graphics& g)
     g.fillAll (juce::Colours::black.withAlpha (0.55f));
     const auto p = panel().toFloat();
     g.setOpacity (1.0f);
-    drawNine (g, image, p, 70, 35.0f);
+    image.draw (g, p, 35.0f);
 
     const auto line = [&] (const juce::String& text, float size, float y, float alpha)
     {
@@ -274,7 +301,7 @@ void IoPanel::timerCallback()
 void IoPanel::paint (juce::Graphics& g)
 {
     g.setOpacity (1.0f);
-    drawNine (g, image, getLocalBounds().toFloat(), 70, 14.0f);
+    image.draw (g, getLocalBounds().toFloat(), 14.0f);
     const double now = juce::Time::getMillisecondCounterHiRes();
     const auto xOf = [] (juce::Rectangle<float> r, float db)
     { return r.getX() + r.getWidth() * juce::jlimit (0.0f, 1.0f, (db - floorDb) / (ceilingDb - floorDb)); };
@@ -613,6 +640,25 @@ GaragePanel::GaragePanel (GentraAudioProcessor& p, RoadView& r) : processor (p),
     close.setTitle (ru ("Закрыть гараж"));
     addAndMakeVisible (close);
     setTitle (ru ("Гараж"));
+    setBufferedToImage (true);
+    startTimerHz (60);
+}
+
+int GaragePanel::stateNow() const
+{
+    int state = road.getSelected() + 1;
+    for (int car : processor.getCarOrder())
+        state = state * 31 + car * 2 + (road.isHidden (car) ? 1 : 0);
+    return state;
+}
+
+void GaragePanel::timerCallback()
+{
+    if (const int state = stateNow(); moving || state != shownState)
+    {
+        shownState = state;
+        repaint();
+    }
 }
 
 void GaragePanel::resized()
@@ -639,7 +685,7 @@ int GaragePanel::slotAt (float y) const
 void GaragePanel::paint (juce::Graphics& g)
 {
     g.setOpacity (1.0f);
-    drawNine (g, image, getLocalBounds().toFloat(), 70, 35.0f);
+    image.draw (g, getLocalBounds().toFloat(), 35.0f);
 
     g.setColour (juce::Colour (ink));
     g.setFont (RoadView::font (28.0f));
@@ -649,11 +695,13 @@ void GaragePanel::paint (juce::Graphics& g)
     g.drawText (ru ("Сверху вниз — порядок эффектов"), 26, 40, 220, 16, juce::Justification::centredLeft);
 
     const auto order = dragCar >= 0 ? dragOrder : processor.getCarOrder();
+    moving = false;
     for (int slot = 0; slot < RoadView::numCars; ++slot)
     {
         auto& y = shownY[static_cast<size_t> (order[static_cast<size_t> (slot)])];
         const float target = rowBounds (slot).getY();
-        y = placed ? y + (target - y) * 0.3f : target;
+        y = placed && std::abs (target - y) > 0.5f ? y + (target - y) * 0.3f : target;
+        moving = moving || ! juce::approximatelyEqual (y, target);
     }
     placed = true;
 
@@ -721,7 +769,11 @@ void GaragePanel::mouseMove (const juce::MouseEvent& e)
     const int slot = slotAt (e.position.y);
     const bool onRow = slot >= 0 && rowBounds (slot).contains (e.position);
     const bool onToggle = onRow && toggleBounds (rowBounds (slot)).contains (e.position);
-    hoverSlot = onRow ? slot : -1;
+    if (const int hover = onRow ? slot : -1; hover != hoverSlot)
+    {
+        hoverSlot = hover;
+        repaint();
+    }
     setMouseCursor (onToggle ? juce::MouseCursor::PointingHandCursor
                     : onRow  ? juce::MouseCursor::DraggingHandCursor
                              : juce::MouseCursor::NormalCursor);
@@ -730,6 +782,7 @@ void GaragePanel::mouseMove (const juce::MouseEvent& e)
 void GaragePanel::mouseExit (const juce::MouseEvent&)
 {
     hoverSlot = -1;
+    repaint();
 }
 
 void GaragePanel::mouseDown (const juce::MouseEvent& e)

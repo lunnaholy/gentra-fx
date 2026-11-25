@@ -3,6 +3,17 @@
 #include "PluginProcessor.h"
 #include "RoadView.h"
 
+// Металлическая табличка (panel.png) любого размера: углы с винтами не тянутся. Собирается из девяти кусков один раз
+// под пиксели экрана и дальше рисуется готовой: всё окно перерисовывается 60 раз в секунду вместе с дорогой.
+struct Panel
+{
+    void draw (juce::Graphics&, juce::Rectangle<float> area, float corner);
+
+    juce::Image source = RoadView::image ("panel_png");
+    std::array<juce::Image, 4> ready; // под разные размеры: один стиль рисует несколько кнопок
+    size_t next = 0;
+};
+
 // Стиль всплывающей таблички: шрифт интерфейса, чёрный текст и ползунки.
 struct BoxLook final : juce::LookAndFeel_V4
 {
@@ -14,7 +25,7 @@ struct BoxLook final : juce::LookAndFeel_V4
     // Текстовые кнопки — маленькие металлические таблички.
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
     juce::Font getTextButtonFont (juce::TextButton&, int) override;
-    juce::Image panel = RoadView::image ("panel_png");
+    Panel panel;
 
     // Ползунок: пустой паз, поверх — светящийся до ручки, сверху ручка.
     juce::Image track = RoadView::image ("slider_track_png"), fill = RoadView::image ("slider_fill_png"),
@@ -25,7 +36,7 @@ struct BoxLook final : juce::LookAndFeel_V4
 struct Box final : juce::Component
 {
     void paint (juce::Graphics&) override;
-    juce::Image image = RoadView::image ("panel_png");
+    Panel image;
 };
 
 // «О плагине»: затемнение на всё окно и металлическая табличка с названием, версией, ссылками и копирайтом.
@@ -43,7 +54,7 @@ public:
 private:
     juce::Rectangle<int> panel() const;
     std::vector<std::unique_ptr<juce::HyperlinkButton>> links;
-    juce::Image image = RoadView::image ("panel_png");
+    Panel image;
 };
 
 // Вход и выход всей цепочки: гейн в дБ (двойной клик — 0) и индикаторы пика L/R со спадом, удержанием пика
@@ -73,7 +84,7 @@ private:
     GentraAudioProcessor& processor;
     std::array<Side, 2> sides; // 0 — вход, 1 — выход
     double lastTick = 0.0;
-    juce::Image image = RoadView::image ("panel_png");
+    Panel image;
 };
 
 // График белой машины: примерная АЧХ полос и громкости. Точки полос тянутся мышью, как в эквалайзере микшера FL:
@@ -130,7 +141,7 @@ private:
 
 // Гараж: все машины списком. Сверху вниз — порядок цепочки эффектов, меняется перетаскиванием;
 // тумблер справа — едет машина по дороге или стоит в гараже; клик по строке открывает машину на дороге.
-class GaragePanel final : public juce::Component
+class GaragePanel final : public juce::Component, private juce::Timer
 {
 public:
     GaragePanel (GentraAudioProcessor&, RoadView&);
@@ -153,13 +164,18 @@ private:
 
     GentraAudioProcessor& processor;
     RoadView& road;
-    juce::Image image = RoadView::image ("panel_png");
+    Panel image;
     GentraAudioProcessor::CarOrder dragOrder {}; // порядок во время перетаскивания; в процессор — по отпусканию
     int dragCar = -1, hoverSlot = -1;
     float dragY = 0.0f, grab = 0.0f; // верх перетаскиваемой строки и где за неё взялись
     bool dragging = false;
-    mutable std::array<float, RoadView::numCars> shownY {}; // строки доезжают до своих мест (рисуется 60 раз в секунду вместе с дорогой)
-    mutable bool placed = false;
+    // Панель рисуется в картинку и перерисовывается, только когда что-то поменялось: дорога под ней обновляется
+    // 60 раз в секунду, а двенадцать строк с текстом — дорогой кадр. Таймер следит за тем, что меняется не мышью.
+    void timerCallback() override;
+    int stateNow() const; // порядок, скрытые и открытая машина одним числом
+    int shownState = 0;
+    mutable std::array<float, RoadView::numCars> shownY {}; // строки доезжают до своих мест
+    mutable bool placed = false, moving = false;
 };
 
 class GentraAudioProcessorEditor final : public juce::AudioProcessorEditor

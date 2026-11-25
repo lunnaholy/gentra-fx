@@ -7,8 +7,7 @@
 
 // Дорога с машинами — порт HTML-прототипа. Каждая машина — эффект из RoadView::working:
 // клик по машине приближает камеру, и её колёса становятся ручками.
-class RoadView final : public juce::Component,
-                       private juce::Timer
+class RoadView final : public juce::Component
 {
 public:
     static constexpr int numCars = 12;
@@ -86,7 +85,7 @@ private:
         int lane = 0;
     };
 
-    void timerCallback() override;
+    void frame();
 
     float param (const char* id) const;
     bool isOn (int car) const;
@@ -115,9 +114,47 @@ private:
     CarLevel carLevel;
     float level (int car) const { return carLevel ? carLevel (car) : 0.0f; }
 
+public:
+    // Уменьшенные копии картинки: машина на дороге занимает на экране в несколько раз меньше пикселей, чем в файле,
+    // а сжимать большую картинку каждый кадр дорого (сжатие у CoreGraphics в разы дороже растяжения).
+    struct Mips
+    {
+        Mips() = default;
+        Mips (const juce::Image& full);
+        const juce::Image& full() const noexcept { return level[0]; }
+        // Самая маленькая из копий 1/2 и 1/4, которой хватает на столько пикселей ширины.
+        const juce::Image& forWidth (float pixels) const noexcept;
+        // Копия ровно под эту ширину: строится, когда ширину спросили второй раз (машина встала в полосу, строка гаража),
+        // до того — forWidth. Помнит несколько ширин: дорога и гараж рисуют одну машину в разных размерах.
+        const juce::Image& fitted (float pixels) const;
+
+        std::array<juce::Image, 3> level;
+        struct Fit
+        {
+            juce::Image image;
+            int width = 0, asked = 0;
+        };
+        mutable std::array<Fit, 4> fits;
+        mutable size_t nextFit = 0;
+    };
+    // Фон, пересчитанный ровно под пиксели экрана: такую картинку система копирует, а не масштабирует — в разы дешевле.
+    // Пока нужный размер меняется каждый кадр (камера едет, окно тянут), копию не строим — at() отдаёт пустую.
+    struct Fitted
+    {
+        Fitted (juce::Image image) : source (std::move (image)) {}
+        juce::Image source;
+        mutable juce::Image fitted;
+        mutable int askedW = 0, askedH = 0;
+        const juce::Image& at (int w, int h) const;
+    };
+
+private:
+
     float bodyHeight (int car) const; // высота картинки кузова в длинах машины
-    std::array<juce::Image, numCars> bodies;
-    juce::Image sky, mountains, skyline, road, lamp, props, wheel, tint, rust, plate, tag;
+    std::array<Mips, numCars> bodies;
+    Fitted sky, mountains, skyline, road, lamp, props;
+    Mips wheel, tint, rust;
+    juce::Image plate, tag;
 
     std::array<Car, numCars> cars;
     juce::Random rng;
@@ -144,6 +181,9 @@ private:
         int wheel = -1;
         float angle = 0.0f, value = 0.0f;
     } drag;
+
+    // Кадры — по развёртке монитора, а не по таймеру: таймер на 60 Гц не попадает в такт экрана, и дорога подёргивается.
+    juce::VBlankAttachment vblank { this, [this] { frame(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoadView)
 };

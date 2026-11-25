@@ -150,21 +150,65 @@ float ahead (float from, float to) { return posMod (to - from, span); }         
 float offset (float a, float b) { return ahead (b, a + span * 0.5f) - span * 0.5f; } // a − b по кольцу, со знаком
 float wrap (float d) { return posMod (d + span * 0.5f, span) - span * 0.5f; }          // разница по кольцу в −span/2..span/2
 
-// Повторяет картинку с шагом period: копия на x = k·period − scroll, видимая часть — [x0, x1].
-void drawStrip (juce::Graphics& g, const juce::Image& img, float scrollX, float period,
-                float w, float h, float top, float x0, float x1)
-{
-    float x = -posMod (scrollX, period);
-    x -= period * std::ceil ((x - x0) / period);
-    const float overlap = w >= period ? 1.0f : 0.0f; // без щелей между бесшовными кусками
-    for (; x < x1; x += period)
-        g.drawImage (img, { x, top, w + overlap, h });
+float pixelScale (juce::Graphics& g) { return g.getInternalContext().getPhysicalPixelScaleFactor(); }
 }
 
+RoadView::Mips::Mips (const juce::Image& full)
+{
+    level[0] = full;
+    for (size_t i = 1; i < level.size() && full.isValid(); ++i)
+        level[i] = level[i - 1].rescaled (juce::jmax (1, level[i - 1].getWidth() / 2), juce::jmax (1, level[i - 1].getHeight() / 2),
+                                          juce::Graphics::highResamplingQuality);
+}
+
+const juce::Image& RoadView::Mips::forWidth (float pixels) const noexcept
+{
+    for (size_t i = level.size() - 1; i > 0; --i)
+        if (static_cast<float> (level[i].getWidth()) >= pixels)
+            return level[i];
+    return level[0];
+}
+
+const juce::Image& RoadView::Mips::fitted (float pixels) const
+{
+    const int w = static_cast<int> (pixels); // вниз: копия чуть растягивается, а не сжимается
+    if (w <= 0 || w >= level[0].getWidth())
+        return level[0];
+    for (auto& f : fits)
+        if (f.width == w)
+        {
+            if (! f.image.isValid() && ++f.asked >= 2)
+                f.image = forWidth (pixels).rescaled (w, juce::jmax (1, juce::roundToInt (static_cast<float> (w * level[0].getHeight())
+                                                                                             / static_cast<float> (level[0].getWidth()))),
+                                                      juce::Graphics::highResamplingQuality);
+            return f.image.isValid() ? f.image : forWidth (pixels);
+        }
+    fits[nextFit] = { {}, w, 1 };
+    nextFit = (nextFit + 1) % fits.size();
+    return forWidth (pixels);
+}
+
+const juce::Image& RoadView::Fitted::at (int w, int h) const
+{
+    static const juce::Image none;
+    const bool steady = w == askedW && h == askedH;
+    askedW = w;
+    askedH = h;
+    if (! steady || w <= 0 || h <= 0)
+        return none;
+    if (fitted.getWidth() != w || fitted.getHeight() != h)
+        // Растянутую больше чем втрое не держим: память растёт квадратом, а копировать её не быстрее, чем растягивать.
+        fitted = w <= 3 * source.getWidth() ? source.rescaled (w, h, juce::Graphics::highResamplingQuality) : none;
+    return fitted;
+}
+
+namespace
+{
 // Картинка машины (или накладка) в единицах машины: x 0..1, y вверх от асфальта.
-void drawInCarUnits (juce::Graphics& g, const juce::Image& img, float alpha,
+void drawInCarUnits (juce::Graphics& g, const RoadView::Mips& mips, float alpha,
                      const juce::AffineTransform& extra = {})
 {
+    const auto& img = mips.fitted (pixelScale (g) * std::hypot (extra.mat00, extra.mat10));
     if (! img.isValid() || alpha <= 0.0f)
         return;
     const auto w = static_cast<float> (img.getWidth());
@@ -179,6 +223,29 @@ juce::Colour rgba (int r, int gr, int b, float a)
 }
 
 juce::String ru (const char* s) { return juce::String::fromUTF8 (s); }
+
+// Повторяет картинку с шагом period вдоль x. Мир → окно: p·k + o; scroll — насколько мир уехал влево; S — пикселей
+// экрана в единице окна. Всё ставится на целые пиксели экрана: готовая копия под экран тогда просто копируется.
+void drawStrip (juce::Graphics& g, const RoadView::Fitted& img, float S, float scroll, float period,
+                float w, float h, float top, float k = 1.0f, juce::Point<float> o = {})
+{
+    const float ds = k * S; // мир → пиксели экрана
+    const bool seamless = w >= period;
+    const float step = seamless ? std::round (period * ds) : period * ds; // бесшовные куски — встык, без щелей
+    const int iw = juce::roundToInt (seamless ? step : w * ds), ih = juce::roundToInt (h * ds);
+    const int y = juce::roundToInt ((top * k + o.y) * S);
+    float x = o.x * S - posMod (scroll * ds, step);
+    x -= step * std::ceil (x / step); // первая копия — у левого края или сразу за ним
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::AffineTransform::scale (1.0f / S));
+    const auto& fit = img.at (iw, ih);
+    for (const float end = static_cast<float> (RoadView::width) * S; x < end; x += step)
+        if (fit.isValid())
+            g.drawImageAt (fit, juce::roundToInt (x), y);
+        else
+            g.drawImage (img.source, juce::Rectangle<int> (juce::roundToInt (x), y, iw, ih).toFloat());
+}
 }
 
 const std::array<RoadView::Working, RoadView::numCars> RoadView::working = []
@@ -223,7 +290,7 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
     : apvts (state), bassLevel (std::move (level)), beatClock (std::move (clock)), carLevel (std::move (effect)),
       sky (asset ("sky_jpg")), mountains (asset ("mountains_png")), skyline (asset ("skyline_png")),
       road (asset ("road_jpg")), lamp (asset ("lamp_png")), props (asset ("props_png")),
-      wheel (asset ("wheel_png")), tint (asset ("tint_png")), rust (asset ("rust_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
+      wheel (asset ("wheel_png")), plate (asset ("plate_png")), tag (asset ("tag_png")),
       camX (span * 0.5f), focusY (H * 0.5f), centreY (H * 0.5f), lastFocusY (H * 0.5f)
 {
     for (size_t i = 0; i < cars.size(); ++i)
@@ -235,15 +302,14 @@ RoadView::RoadView (juce::AudioProcessorValueTreeState& state, std::function<flo
         c.lp = static_cast<float> (c.lane);
         c.x = (static_cast<float> (i) + 0.5f) * span / static_cast<float> (numCars);
     }
-    tint = clipTo (tint, bodies[black]);
-    rust = clipTo (rust, bodies[rustCar]);
+    tint = clipTo (asset ("tint_png"), bodies[black].full());
+    rust = clipTo (asset ("rust_png"), bodies[rustCar].full());
 
     hiddenMask = static_cast<int> (apvts.state.getProperty (hiddenId, defaultHidden));
     place();
     setOpaque (true);
     setSize (width, height);
     lastTick = juce::Time::getMillisecondCounterHiRes();
-    startTimerHz (60);
 }
 
 // ---------------- состояние ----------------
@@ -292,17 +358,18 @@ float RoadView::strength (int car) const
 void RoadView::drawThumbnail (juce::Graphics& g, int car, juce::Rectangle<float> area, float alpha) const
 {
     const auto& body = bodies[static_cast<size_t> (car)];
-    const float aspect = static_cast<float> (body.getHeight()) / static_cast<float> (juce::jmax (1, body.getWidth()));
+    const float aspect = bodyHeight (car);
     const float len = juce::jmin (area.getWidth(), area.getHeight() / aspect);
     const auto toArea = juce::AffineTransform::scale (len, -len).translated (area.getCentreX() - len * 0.5f, area.getBottom());
 
     juce::Graphics::ScopedSaveState s (g);
     drawInCarUnits (g, body, alpha, toArea);
-    const float ww = static_cast<float> (juce::jmax (1, wheel.getWidth())), wh = static_cast<float> (juce::jmax (1, wheel.getHeight()));
     const auto& k = geo (car);
+    const auto& tyre = wheel.forWidth (pixelScale (g) * len * 2.0f * k.wheelR);
+    const float ww = static_cast<float> (juce::jmax (1, tyre.getWidth())), wh = static_cast<float> (juce::jmax (1, tyre.getHeight()));
     g.setOpacity (alpha);
     for (float wx : { k.rearX, k.frontX })
-        g.drawImageTransformed (wheel, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
+        g.drawImageTransformed (tyre, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
                                            .scaled (2.0f * k.wheelR / ww, -2.0f * k.wheelR / wh)
                                            .translated (wx, k.wheelY)
                                            .followedBy (toArea));
@@ -457,9 +524,11 @@ float RoadView::closestGap() const
     return gap;
 }
 
-void RoadView::timerCallback()
+void RoadView::frame()
 {
     const double now = juce::Time::getMillisecondCounterHiRes();
+    if (now - lastTick < 12.0) // экран на 120 Гц — рисуем через кадр: вдвое чаще стоит вдвое дороже
+        return;
     advance (juce::jlimit (0.0f, 0.05f, static_cast<float> ((now - lastTick) * 0.001)));
     lastTick = now;
 }
@@ -588,13 +657,19 @@ void RoadView::advance (float dt)
     }
 
     // Камера едет за открытой машиной и приближается к ней — в середине незакрытой гаражом части.
+    // Доехав, камера встаёт ровно: пока она ползёт на доли пикселя, фон нельзя рисовать готовой копией под экран.
     viewSmooth += (viewWidth - viewSmooth) * juce::jmin (1.0f, dt * 6.0f);
+    if (std::abs (viewWidth - viewSmooth) < 0.05f)
+        viewSmooth = viewWidth;
     const Car* f = selected >= 0 ? &cars[static_cast<size_t> (selected)] : nullptr;
     const float follow = juce::jmin (1.0f, dt * (f != nullptr ? 12.0f : 5.0f));
     const float step = offset (f != nullptr ? f->x : span * 0.5f, camX) * follow;
     camX = posMod (camX + step, span);
     camU += step;
-    focus += ((f != nullptr ? 1.0f : 0.0f) - focus) * juce::jmin (1.0f, dt * 4.0f);
+    const float focusGoal = f != nullptr ? 1.0f : 0.0f;
+    focus += (focusGoal - focus) * juce::jmin (1.0f, dt * 4.0f);
+    if (std::abs (focusGoal - focus) < 0.0003f)
+        focus = focusGoal;
 
     if (f != nullptr)
     {
@@ -671,7 +746,7 @@ float RoadView::wheelHitRadius() const
 
 float RoadView::bodyHeight (int car) const
 {
-    const auto& body = bodies[static_cast<size_t> (car)];
+    const auto& body = bodies[static_cast<size_t> (car)].full();
     return static_cast<float> (body.getHeight()) / static_cast<float> (juce::jmax (1, body.getWidth()));
 }
 
@@ -826,27 +901,28 @@ void RoadView::drawScene (juce::Graphics& g) const
     const float cityScale = juce::jlimit (1.0f, 1.9f, roadTop / 150.0f);
     const float ground = scroll + camU;
 
-    g.drawImage (sky, { 0.0f, 0.0f, W, juce::jmax (40.0f, horizon) });
-    const float mw = 543.0f * mountainScale, mh = 60.0f * mountainScale;
-    drawStrip (g, mountains, ground * 0.03f, mw, mw, mh, horizon - mh, 0.0f, W);
+    const float S = pixelScale (g);
 
+    if (horizon > 0.0f) // камера у открытой машины — небо и город за верхним краем окна
     {
+        drawStrip (g, sky, S, 0.0f, W, W, juce::jmax (40.0f, horizon), 0.0f);
+        const float mw = 543.0f * mountainScale, mh = 60.0f * mountainScale;
+        drawStrip (g, mountains, S, ground * 0.03f, mw, mw, mh, horizon - mh);
         // Город чуть приближается вместе с камерой.
         const float zs = (1.0f + (zoom - 1.0f) * 0.4f) * cityScale;
-        juce::Graphics::ScopedSaveState save (g);
-        g.addTransform (juce::AffineTransform::translation (-W * 0.5f, 0.0f).scaled (zs).translated (W * 0.5f, horizon));
-        drawStrip (g, skyline, ground * 0.1f, 694.0f, 694.0f, 140.0f, -140.0f, W * 0.5f - W * 0.5f / zs, W * 0.5f + W * 0.5f / zs);
+        drawStrip (g, skyline, S, ground * 0.1f, 694.0f, 694.0f, 140.0f, -140.0f, zs, { W * 0.5f - W * 0.5f * zs, horizon });
     }
 
-    juce::Graphics::ScopedSaveState save (g);
     // Земля и машины трясутся, небо и город — нет.
-    g.addTransform (juce::AffineTransform::translation (-W * 0.5f, -focusY).scaled (zoom).translated (centreX + shake.x, centreY + shake.y));
+    const juce::Point<float> origin (centreX + shake.x - W * 0.5f * zoom, centreY + shake.y - focusY * zoom);
+    drawStrip (g, road, S, ground, 1333.0f, 1333.0f, 390.0f, roadTop - 15.5f, zoom, origin);
+    drawStrip (g, props, S, ground * 1.1f, 740.0f, 740.0f, 90.0f, roadBottom + 40.0f - 88.0f, zoom, origin);
+    drawStrip (g, lamp, S, ground * 0.8f, 280.0f, 40.0f, 150.0f, roadTop - 150.0f, zoom, origin);
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::AffineTransform::scale (zoom).translated (origin));
     const float margin = 2.0f + shakePx / zoom;
     const float x0 = W * 0.5f - centreX / zoom - margin, x1 = W * 0.5f + (W - centreX) / zoom + margin;
-
-    drawStrip (g, road, ground, 1333.0f, 1333.0f, 390.0f, roadTop - 15.5f, x0, x1);
-    drawStrip (g, props, ground * 1.1f, 740.0f, 740.0f, 90.0f, roadBottom + 40.0f - 88.0f, x0, x1);
-    drawStrip (g, lamp, ground * 0.8f, 280.0f, 40.0f, 150.0f, roadTop - 150.0f, x0, x1);
 
     std::array<int, numCars> order {};
     for (int i = 0; i < numCars; ++i)
@@ -996,15 +1072,16 @@ void RoadView::drawCar (juce::Graphics& g, int i, float px) const
         const float knob[2] = { mainParam != nullptr ? mainParam->getValue() : 0.0f,
                                 mixParam != nullptr ? mixParam->getValue() : 0.0f };
 
-        const float ww = static_cast<float> (juce::jmax (1, wheel.getWidth()));
-        const float wh = static_cast<float> (juce::jmax (1, wheel.getHeight()));
+        const auto& tyre = wheel.forWidth (pixelScale (g) * 2.0f * k.wheelR);
+        const float ww = static_cast<float> (juce::jmax (1, tyre.getWidth()));
+        const float wh = static_cast<float> (juce::jmax (1, tyre.getHeight()));
         for (int w = 0; w < 2; ++w)
         {
             const float wx = w == 0 ? k.rearX : k.frontX, wy = k.wheelY, arcR = 1.2f * k.wheelR;
             // Колесо-ручка повёрнуто на своё значение, обычное — катится.
             const float angle = knobs ? knob[w] * 1.5f * pi : c.spin;
             g.setOpacity (alpha);
-            g.drawImageTransformed (wheel, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
+            g.drawImageTransformed (tyre, juce::AffineTransform::translation (-ww * 0.5f, -wh * 0.5f)
                                                .scaled (2.0f * k.wheelR / ww, -2.0f * k.wheelR / wh)
                                                .rotated (-angle)
                                                .translated (wx, wy));
