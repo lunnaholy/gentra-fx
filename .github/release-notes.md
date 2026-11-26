@@ -11,3 +11,5 @@ xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Sauce Gentra FX.vs
 ```
 
 **Windows (64-bit)** — распакуйте архив и скопируйте папку `Sauce Gentra FX.vst3` в `C:\Program Files\Common Files\VST3\`.
+
+**Linux (x64)** — распакуйте архив и скопируйте папку `Sauce Gentra FX.vst3` в `~/.vst3/`.

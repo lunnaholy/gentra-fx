@@ -2,7 +2,7 @@
 
 <p align="center">
   Мультиэффект-плагин: 12 эффектов в одной цепочке, каждый — машина на дороге.<br>
-  VST3 и AU · macOS (Apple Silicon) и Windows (x64)
+  VST3 и AU · macOS (Apple Silicon), Windows (x64) и Linux (x64)
 </p>
 
 <p align="center">
@@ -60,6 +60,8 @@ xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Sauce Gentra FX.vs
 
 **Windows (64-bit)** — скопируйте папку `Sauce Gentra FX.vst3` в `C:\Program Files\Common Files\VST3\`.
 
+**Linux (x64)** — скопируйте папку `Sauce Gentra FX.vst3` в `~/.vst3/`.
+
 ## Сборка из исходников
 
 Нужны CMake и компилятор C++; JUCE скачается сам.
@@ -70,6 +72,13 @@ xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Sauce Gentra FX.vs
 ```
 
 На Windows: `cmake -B build && cmake --build build --config Release`.
+
+На Linux сначала поставьте заголовки (Debian/Ubuntu), потом соберите:
+
+```
+sudo apt install build-essential cmake libasound2-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libfreetype-dev libfontconfig1-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+```
 
 Релиз собирает GitHub Actions по тегу версии (версия плагина берётся из тега):
 
