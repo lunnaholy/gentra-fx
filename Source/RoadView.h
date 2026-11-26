@@ -179,7 +179,8 @@ private:
     struct Drag
     {
         int wheel = -1;
-        float angle = 0.0f, value = 0.0f;
+        juce::Point<float> last;
+        float value = 0.0f;
     } drag;
 
     // Кадры — по развёртке монитора, а не по таймеру: таймер на 60 Гц не попадает в такт экрана, и дорога подёргивается.

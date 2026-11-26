@@ -821,8 +821,7 @@ void RoadView::mouseDown (const juce::MouseEvent& e)
     if (const int w = wheelAt (e.position); w >= 0)
     {
         auto* p = knobParam (w);
-        const auto c = wheelCentre (w);
-        drag = { w, std::atan2 (e.position.y - c.y, e.position.x - c.x), p->convertFrom0to1 (p->getValue()) };
+        drag = { w, e.position, p->convertFrom0to1 (p->getValue()) };
         p->beginChangeGesture();
         return;
     }
@@ -839,17 +838,15 @@ void RoadView::mouseDrag (const juce::MouseEvent& e)
     if (drag.wheel < 0 || ! knobsVisible())
         return;
 
-    // Колесо крутится по кругу: 270° = весь диапазон.
+    // Как в FL Studio: вверх и вправо — больше, вниз и влево — меньше. 200 px = весь диапазон.
+    // Shift или Ctrl/Cmd — точный режим, в 10 раз медленнее.
     auto* p = knobParam (drag.wheel);
-    const auto c = wheelCentre (drag.wheel);
-    const float a = std::atan2 (e.position.y - c.y, e.position.x - c.x);
-    float d = a - drag.angle;
-    if (d > pi) d -= 2.0f * pi;
-    if (d < -pi) d += 2.0f * pi;
-    drag.angle = a;
+    const float px = (e.mods.isShiftDown() || e.mods.isCommandDown()) ? 2000.0f : 200.0f;
+    const float d = ((e.position.x - drag.last.x) - (e.position.y - drag.last.y)) / px;
+    drag.last = e.position;
 
     const auto& range = p->getNormalisableRange();
-    drag.value = juce::jlimit (range.start, range.end, drag.value + d / (1.5f * pi) * (range.end - range.start));
+    drag.value = juce::jlimit (range.start, range.end, drag.value + d * (range.end - range.start));
     p->setValueNotifyingHost (p->convertTo0to1 (drag.value));
 }
 
