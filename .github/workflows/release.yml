@@ -18,11 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, name: macOS-arm64, jobs: --parallel 4 }
+          - { os: macos-latest, name: macOS-arm64, targets: SauceGentraFX_VST3 SauceGentraFX_AU, jobs: --parallel 4 }
           # Visual Studio сама компилирует файлы проекта параллельно (/MP в CMakeLists.txt); если собирать параллельно
           # ещё и проекты, раннеру не хватает памяти.
           # windows-2022, а не latest: компилятор Visual Studio 2026 падает с внутренней ошибкой на Tests/PluginTest.cpp.
-          - { os: windows-2022, name: Windows-x64, jobs: '' }
+          - { os: windows-2022, name: Windows-x64, targets: SauceGentraFX_VST3, jobs: '' }
     defaults:
       run:
         shell: bash
@@ -42,7 +42,7 @@ jobs:
       - name: Build
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENTRA_COPY_AFTER_BUILD=OFF ${{ steps.version.outputs.cmake }}
-          cmake --build build --config Release --target SauceGentraFX_All ${{ matrix.jobs }}
+          cmake --build build --config Release --target ${{ matrix.targets }} ${{ matrix.jobs }} # без Standalone: он только для локальной отладки
 
       - name: Test
         run: |
@@ -57,7 +57,6 @@ jobs:
           cd build/SauceGentraFX_artefacts/Release
           ditto "VST3/Sauce Gentra FX.vst3" "../../../$out/Sauce Gentra FX.vst3"
           ditto "AU/Sauce Gentra FX.component" "../../../$out/Sauce Gentra FX.component"
-          ditto "Standalone/Sauce Gentra FX.app" "../../../$out/Sauce Gentra FX.app"
           cd ../../..
           ditto -c -k --keepParent "$out" "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip"
 
@@ -68,7 +67,6 @@ jobs:
           $out = "Sauce Gentra FX ${{ steps.version.outputs.name }}"
           New-Item -ItemType Directory $out | Out-Null
           Copy-Item -Recurse "build/SauceGentraFX_artefacts/Release/VST3/Sauce Gentra FX.vst3" $out
-          Copy-Item "build/SauceGentraFX_artefacts/Release/Standalone/Sauce Gentra FX.exe" $out
           Compress-Archive $out "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip"
 
       - uses: actions/upload-artifact@v4
