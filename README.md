@@ -1,99 +1,84 @@
-<p align="center">твой новый любимый плагин</p>
-
 <h1 align="center"><img src="Assets/plate.png" alt="Sauce Gentra FX" width="380"></h1>
 
 <p align="center">
-  <i>«воой акя бу малибу ики турбоми??»</i><br>
-  тачки с дорог ташкента специально для твоей поеботы
+  Мультиэффект-плагин: 12 эффектов в одной цепочке, каждый — машина на дороге.<br>
+  VST3 и AU · macOS (Apple Silicon) и Windows (x64)
 </p>
 
 <p align="center">
-  <a href="https://github.com/lunnaholy/gentra-fx/releases/latest"><b>скачать</b></a> ·
-  <a href="https://sauce.emeel.fyi/gentra-fx">сайт</a> ·
-  <a href="https://t.me/lnhly">telegram</a>
+  <a href="https://github.com/lunnaholy/gentra-fx/releases/latest"><b>Скачать</b></a> ·
+  <a href="https://sauce.emeel.fyi/gentra-fx">Сайт</a> ·
+  <a href="https://t.me/lnhly">Telegram</a>
 </p>
 
-<p align="center">VST3 и AU, без растаможки · macOS (apple silicon) и windows (x64)</p>
+![Окно плагина: дорога с машинами и открытый гараж](docs/shot-garage.jpg)
 
-![окно плагина: дорога с тачками и открытый гараж](docs/shot-garage.jpg)
+## Эффекты
 
-## шашки по чиланзару
+Заднее колесо машины — главная ручка эффекта, остальные параметры — на табличке. Скорость машины зависит от силы эффекта.
 
-каждая тачка - эффект. это корыто без музыки не тронется, так что чем сильнее крутишь тем быстрее едет
+| | Машина | Эффект | Главная ручка |
+|---|---|---|---|
+| <img src="Assets/car_black.png" width="110"> | Gentra | Саб и фильтр нижних частот | Подъём низа |
+| <img src="Assets/car_rust.png" width="110"> | Приора | Low-res | Понижение разрядности и частоты дискретизации |
+| <img src="Assets/car_red.png" width="110"> | Жигули | Дисторшн | Драйв до +36 дБ |
+| <img src="Assets/car_white.png" width="110"> | Нексия | Эквалайзер | Общая громкость ±12 дБ |
+| <img src="Assets/car_silver.png" width="110"> | BYD Song Plus | Дилей | Время: нота по темпу или 60–600 мс |
+| <img src="Assets/car_green.png" width="110"> | BYD Seagull | Тормоз ленты | Время остановки 10 мс–5 с |
+| <img src="Assets/car_orange.png" width="110"> | Дамас | Автопанорама | Глубина панорамирования |
+| <img src="Assets/car_purple.png" width="110"> | Спарк | Сайдчейн | Глубина провала громкости |
+| <img src="Assets/car_blue.png" width="110"> | Hongqi E-QM5 | Хорус | Глубина модуляции |
+| <img src="Assets/car_pink.png" width="110"> | Лисян | Компрессор | Порог 0…−36 дБ |
+| <img src="Assets/car_grey.png" width="110"> | BYD Yuan Up | Реверб | Размер помещения |
+| <img src="Assets/car_yellow.png" width="110"> | Zeekr 007 | Гейт | Глубина гейта |
 
-## 12 невероятно оригинальных эффектов
+## Цепочка
 
-мега очевидное расположение функциональных крутилок в форме колёс машины поможет инклюзивным реперам продолжать писать свой трап
+- Гараж — список эффектов сверху вниз в порядке обработки; строки перетаскиваются.
+- Тумблер включает и отключает эффект.
+- По умолчанию на дороге только Gentra, остальные машины стоят в гараже.
+- Вход и выход: ±24 дБ, индикаторы пика L/R и лампа перегруза.
+- Окно масштабируется от 60 до 200%.
+- Порядок, состав цепочки и размер окна сохраняются в пресете.
 
-| | тачка | эффект | заднее колесо | на дороге |
-|---|---|---|---|---|
-| <img src="Assets/car_black.png" width="110"> | gentra | саб и тонировка | подъём низа | кузов качается от баса |
-| <img src="Assets/car_rust.png" width="110"> | приора | low-res | понижение разрядности и частоты дискретизации | ржавчина гуще с силой эффекта |
-| <img src="Assets/car_red.png" width="110"> | жигули | дисторшн | драйв до +36 дБ | пламя из выхлопа |
-| <img src="Assets/car_white.png" width="110"> | нексия | эквалайзер | общая громкость ±12 дБ | фары ярче с силой эквализации |
-| <img src="Assets/car_silver.png" width="110"> | BYD song plus | дилей | время: нота по темпу или 60–600 мс | сзади едут копии |
-| <img src="Assets/car_green.png" width="110"> | BYD seagull | тормоз ленты | время остановки 10 мс–5 с | горят стоп-сигналы |
-| <img src="Assets/car_orange.png" width="110"> | дамас | автопанорама | глубина панорамирования | качается поперёк полосы, мигает поворотник |
-| <img src="Assets/car_purple.png" width="110"> | спарк | сайдчейн | глубина провала громкости | кузов приседает вместе с провалом |
-| <img src="Assets/car_blue.png" width="110"> | hongqi E-QM5 | хорус | глубина модуляции | за машиной волна |
-| <img src="Assets/car_pink.png" width="110"> | лисян | компрессор | порог 0…−36 дБ | кузов сплющивается от подавления |
-| <img src="Assets/car_grey.png" width="110"> | BYD yuan up | реверб | размер помещения | отражение на асфальте |
-| <img src="Assets/car_yellow.png" width="110"> | zeekr 007 | гейт | глубина гейта | шашки такси горят, пока гейт открыт |
+![Эквалайзер: точки на графике АЧХ перетаскиваются мышью](docs/shot-eq.jpg)
 
-## гараж = цепочка (парковка бесплатная)
+## Установка
 
-- сверху вниз - порядок эффектов. перетаскивай строчку чтобы изменить порядок. нажми и перетащи. там есть за что нажимать. там видно
-- с помощью тумблера включай и отключай эффект
-- по умолчанию на дороге только чёрная джентра на нуле, остальные ждут тебя в гараже
-- порядок, гараж и всё остальное сохраняется в пресете.
+Скачайте архив со страницы [Releases](https://github.com/lunnaholy/gentra-fx/releases/latest) и распакуйте.
 
-![открытая нексия: эквалайзер с графиком на экране магнитолы](docs/shot-eq.jpg)
-
-<p align="center"><sub>нексия с эквалайзером. да, в нексии есть экран магнитолы, и точки на нём тянутся мышкой.</sub></p>
-
-## приколы
-
-- **DOLBIT NORMALNO** — дорога ловит доли из DAW: сильная бьёт сильнее, а на стопе есть тряска (причина бас).
-- **шашки** — тачки перестраиваются, моргают дальним тем, кто тащится, и уступают. скорость каждой зависит от силы эффекта.
-- **вход и выход** — ±24 дБ, индикаторы пика L/R и лампа перегруза. двойной клик сбрасывает уровни.
-- **окно 60–200%** — тянется за угол, размер сохраняется в пресете.
-
-## установка
-
-скачай архив со страницы [releases](https://github.com/lunnaholy/gentra-fx/releases/latest) и распакуй.
-
-**macOS (apple silicon)** — скопируй:
+**macOS (Apple Silicon)** — скопируйте:
 
 - `Sauce Gentra FX.vst3` → `~/Library/Audio/Plug-Ins/VST3/`
 - `Sauce Gentra FX.component` → `~/Library/Audio/Plug-Ins/Components/`
 
-сборка не подписана apple (растаможка стоит $99 в год), поэтому macOS её блокирует. сними блокировку в терминале и перезапусти DAW:
+Сборка не подписана Apple, поэтому macOS её блокирует. Снимите блокировку в Терминале и перезапустите DAW:
 
 ```
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Sauce Gentra FX.vst3" ~/Library/Audio/Plug-Ins/Components/"Sauce Gentra FX.component"
 ```
 
-**windows (64-bit)** — скопируй папку `Sauce Gentra FX.vst3` в `C:\Program Files\Common Files\VST3\`.
+**Windows (64-bit)** — скопируйте папку `Sauce Gentra FX.vst3` в `C:\Program Files\Common Files\VST3\`.
 
-## собрать самому
+## Сборка из исходников
 
-нужны CMake и компилятор C++; JUCE скачается сам.
+Нужны CMake и компилятор C++; JUCE скачается сам.
 
 ```
 ./build.sh          # macOS: собрать, прогнать тесты, поставить VST3 и AU в ~/Library
-./build.sh run      # то же и открыть standalone для отладки
+./build.sh run      # то же и открыть Standalone для отладки
 ```
 
-на windows: `cmake -B build && cmake --build build --config Release`.
+На Windows: `cmake -B build && cmake --build build --config Release`.
 
-релиз собирает GitHub Actions по тегу версии (версия плагина берётся из тега):
+Релиз собирает GitHub Actions по тегу версии (версия плагина берётся из тега):
 
 ```
 git tag v1.2.0 && git push origin v1.2.0
 ```
 
-пробная сборка без релиза — кнопка run workflow во вкладке actions.
+Пробная сборка без релиза — кнопка Run workflow во вкладке Actions.
 
-<p align="center"><img src="docs/dolbit.png" alt="DOLBIT NORMAL'NO" width="290"></p>
+---
 
-<p align="center"><sub>© 2026 lunnaholy · шрифт PT sans narrow — paratype free font license · сделано на JUCE, чистейший вайбкод</sub></p>
+© 2026 lunnaholy · Шрифт PT Sans Narrow — ParaType Free Font License · Сделано на JUCE
