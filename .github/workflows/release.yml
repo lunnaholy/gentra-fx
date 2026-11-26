@@ -23,6 +23,8 @@ jobs:
           # ещё и проекты, раннеру не хватает памяти.
           # windows-2022, а не latest: компилятор Visual Studio 2026 падает с внутренней ошибкой на Tests/PluginTest.cpp.
           - { os: windows-2022, name: Windows-x64, targets: SauceGentraFX_VST3, jobs: '' }
+          # ubuntu-22.04, а не latest: плагин требует glibc не новее той, с которой собран, — старый образ запускается у большего числа людей.
+          - { os: ubuntu-22.04, name: Linux-x64, targets: SauceGentraFX_VST3, jobs: --parallel 4 }
     defaults:
       run:
         shell: bash
@@ -39,6 +41,13 @@ jobs:
             echo "name=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT" # версия внутри плагина — из CMakeLists.txt
           fi
 
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libasound2-dev libx11-dev libxcomposite-dev libxcursor-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libfreetype-dev libfontconfig1-dev
+
       - name: Build
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENTRA_COPY_AFTER_BUILD=OFF ${{ steps.version.outputs.cmake }}
@@ -47,7 +56,8 @@ jobs:
       - name: Test
         run: |
           cmake --build build --config Release --target GentraTest ${{ matrix.jobs }}
-          ctest --test-dir build -C Release --output-on-failure
+          # Тест открывает редактор плагина; на Linux для этого нужен X-сервер, на раннере его заменяет xvfb.
+          ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} ctest --test-dir build -C Release --output-on-failure
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
@@ -68,6 +78,14 @@ jobs:
           New-Item -ItemType Directory $out | Out-Null
           Copy-Item -Recurse "build/SauceGentraFX_artefacts/Release/VST3/Sauce Gentra FX.vst3" $out
           Compress-Archive $out "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          out="Sauce Gentra FX ${{ steps.version.outputs.name }}"
+          mkdir "$out"
+          cp -r "build/SauceGentraFX_artefacts/Release/VST3/Sauce Gentra FX.vst3" "$out/"
+          zip -r "Sauce-Gentra-FX-${{ steps.version.outputs.name }}-${{ matrix.name }}.zip" "$out"
 
       - uses: actions/upload-artifact@v4
         with:
